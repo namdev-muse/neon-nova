@@ -1,5 +1,42 @@
 # Neon Nova — devlog
 
+## M6 — Release (v1.0.0, 2026-11-21)
+
+No new gameplay — this milestone is the release. Version bumped to
+v1.0.0 across the code, tests and docs; README refreshed (smoke count
+304, Firefox render check, known-issues section carried over from the
+M5 log so the release is honest about what it is); screenshots
+regenerated from the final build; full test suite green, a final
+real-browser playthrough in a real browser, and the release tagged
+v1.0.0 on GitHub. Neon Nova ships as: 12 hand-crafted wave sets,
+Campaign, endless Survival, 6 ship upgrades, generative music,
+accessibility settings (text size, high contrast, shake, flashing),
+touch controls, and the FPS guard.
+
+Result: smoke 304/304, bot completes all 12 sets, render check PASS
+in Chromium and Firefox (zero console errors), size sweep inspected
+by eye at 1280x720, 2560x1080 and 1080x2340 (menu, gameplay,
+settings, upgrade at 2560 — all clean). Final playthrough (real
+mouse + held WASD, campaign): **GO** — cleared set 1 (48 kills,
+14,220, max combo chain 36, finished on 1 shield — it fought),
+bought Magnet Core on the draft screen, carried the loadout into set
+2 and fought to wave 4 (39 kills, 23,550) before dying to the
+Crossfire shooters — an honest death, not a systematic one. FOV
+kicked 55 → 63.7, trauma peaked 0.84, every feedback bundle fired,
+zero console errors. Push: [commits] — live site verified serving
+v1.0.0 by curl + connector read-back; release tag v1.0.0 created.
+
+### Known issues (v1.0.0)
+
+- Survival wave 1 is clearable by a perfect-aim stationary turret (M4)
+  — the run-level gate holds (dies in wave 2 at 7.6s).
+- Set 1 is still easy for a good player (M4) — the ramp lives in
+  sets 2–12.
+- Campaign progress is kept in the local save only — no cloud sync.
+- The FPS guard is one-way during a run: it never steps back up
+  mid-run, only on returning to the menu. Deliberate — stepping up
+  again would thrash on a marginal device.
+
 ## M5 — Polish & robustness (v0.5.0, 2026-11-21)
 
 No new modes, no new enemies — this milestone is the game growing up.
