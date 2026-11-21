@@ -1,5 +1,29 @@
 # Neon Nova — devlog
 
+## M2 — Wave craft (v0.2.0, 2026-11-21)
+
+Twelve campaign wave sets, each with its own identity. The six new sets
+are shooter-heavy (Bolt Storm), splitter-heavy (Split Flood), staggered
+rhythm (Rolling Thunder), chaser floods in rolling waves (Floodgate),
+mixed siege (Nova Siege) and the hardest gauntlet (Final Nova). Threat
+rises smoothly across all 12 sets (53.5 → 189.5, no adjacent jump above
+1.33x, and the new sets sit at 1.05–1.15x each) and every set carries a
+distinct ring/disc palette. The save schema now keeps bests for sets
+1–12. Two tuning rounds were needed: the first Floodgate and Final Nova
+crushed the greedy bot at their last waves (3 hits, run over), so the
+big groups were split into three staggered arrivals 1.5s apart — same
+headcount, survivable arrivals. Result: the greedy bot completes all 12
+sets (0–2 hits taken, Floodgate the hardest at 2 hits / 1 shield left),
+sitting still fails all 12. Real-browser playtests of sets 7, 9 and 12
+all GO — see the M2 run report for the per-set verdicts.
+
+### Known issues (M2)
+
+- Set 1 is still easy for a good player (clean clear, combo never
+  breaks) — the ramp lives in sets 2–12.
+- Combo window (3.5s) may be too forgiving — the multiplier sits at
+  x4.0 from wave 2 on. M4 economy tuning.
+
 ## M1 — Core (v0.1.0, 2026-11-21)
 
 The fifth game in the rotation, and the third 3D game of the loop:
