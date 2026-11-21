@@ -1,9 +1,11 @@
-// Neon Nova v0.3.0 — headless Chromium render check.
+// Neon Nova v0.4.0 — headless Chromium render check.
 // Serves the game dir over local HTTP, loads it in headless Chromium, and
 // asserts the M1 core, by hook and by eye:
 //   - the menu renders over a LIVE 3D scene (the attract flight actually
 //     flies — the demo ship moves), with no version/engine text anywhere
 //     the player can see, one clear primary Play action, and 12 wave-set cards
+//   - M4 gates on a fresh save: sets 2-12 locked, Survival locked; the
+//     Campaign and Survival buttons are present and labelled
 //   - Play starts a run: the HUD shows, the ship moves (hook + real keys),
 //     and movement direction is asserted in SCREEN space
 //   - aim is asserted in SCREEN space: the mouse screen position maps to
@@ -14,6 +16,12 @@
 //   - seeking an enemy costs a shield (flash fires, and is suppressed
 //     with reduce-flashing on); losing all 3 shields ends the run
 //   - pause focuses Resume; Enter resumes; R restarts
+//   - M4 campaign: the autopilot clears set 1 in campaign mode, the
+//     upgrade screen opens, buying a card spends energy and applies
+//     the upgrade, and continuing starts set 2 with the loadout —
+//     then the menu shows set 2 and Survival unlocked
+//   - M4 survival: the Survival button starts an endless run (mode
+//     survival, wave 1, no set end)
 //   - zero console errors and zero page errors, and a WebGL context exists
 //
 // CDN note: the repo pins Three.js 0.160.0 from jsdelivr and does NOT
@@ -128,8 +136,8 @@ try {
   }
 
   const version = await page.evaluate(() => window.__nova.version);
-  if (version !== '0.3.0') throw new Error(`expected version 0.3.0, got ${version}`);
-  console.log('render-check: game module initialised, version 0.3.0');
+  if (version !== '0.4.0') throw new Error(`expected version 0.4.0, got ${version}`);
+  console.log('render-check: game module initialised, version 0.4.0');
 
   // WebGL context exists and the canvas is on screen.
   const gl = await page.evaluate(() => {
@@ -145,7 +153,7 @@ try {
   // text anywhere the player can see.
   const menuText = await page.textContent('#menu');
   if (!menuText.includes('NEON NOVA')) throw new Error('menu title missing');
-  if (menuText.includes('v0.3.0') || menuText.includes('Three.js') || menuText.includes('0.160.0')) {
+  if (menuText.includes('v0.4.0') || menuText.includes('Three.js') || menuText.includes('0.160.0')) {
     throw new Error('menu shows version/engine text — it must live in the README only');
   }
   const playClass = await page.getAttribute('#btn-play', 'class');
@@ -157,6 +165,24 @@ try {
     throw new Error(`wave set list wrong: ${JSON.stringify(sets.map((s) => s.name))}`);
   }
   console.log('render-check: menu renders — live 3D behind it, no version text, Play primary, 12 wave sets');
+
+  // M4: the Campaign and Survival buttons exist; on a fresh save the
+  // gates are closed — sets 2-12 locked, Survival locked — and the
+  // lock states are visible on the cards, not just in the save.
+  if (!await page.isVisible('#btn-campaign')) throw new Error('Campaign button missing from the menu');
+  if (!await page.isVisible('#btn-survival')) throw new Error('Survival button missing from the menu');
+  const unlocks0 = await page.evaluate(() => window.__nova.unlocks());
+  if (unlocks0.sets[1] !== true || unlocks0.sets[2] !== false || unlocks0.sets[12] !== false) {
+    throw new Error(`fresh save should unlock only set 1: ${JSON.stringify(unlocks0.sets)}`);
+  }
+  if (unlocks0.survival !== false) throw new Error('Survival should be locked on a fresh save');
+  const lockedCards = await page.locator('#set-select .set-card.locked').count();
+  if (lockedCards !== 11) throw new Error(`expected 11 locked set cards on a fresh save, got ${lockedCards}`);
+  const survDisabled = await page.isDisabled('#btn-survival');
+  if (!survDisabled) throw new Error('Survival button should be disabled while locked');
+  const survLabel = await page.textContent('#btn-survival');
+  if (!survLabel.includes('clear Set 1')) throw new Error(`locked Survival button should state its requirement, got: ${survLabel}`);
+  console.log('render-check: M4 gates closed on a fresh save — sets 2-12 locked (11 locked cards), Survival locked with its requirement stated');
 
   // The attract flight flies behind the menu: the demo ship moves
   // (position change, not just kills — the ship must actually fly).
@@ -212,39 +238,59 @@ try {
   // SCREEN space: ArrowLeft must move the ship LEFT on screen,
   // ArrowRight RIGHT. The camera looks from +z, so world x is NOT
   // screen x — the Drift M2 lesson.
-  const scr0 = await page.evaluate(() => window.__nova.info().screen);
-  await page.keyboard.down('ArrowLeft');
-  try {
-    await page.waitForFunction((x0) => window.__nova.info().screen.x < x0 - 20, scr0.x, { timeout: 20000 });
-  } finally {
-    await page.keyboard.up('ArrowLeft');
+  // These legs are slow under swiftshader (~0.3x game time), and the
+  // swarm closes in while the ship barely moves — the run can end
+  // mid-leg. A leg that fails because the run ended restarts fresh
+  // and retries once; a leg that fails with the run alive is a real
+  // failure.
+  async function moveScreen(key, dir) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const ph = await page.evaluate(() => window.__nova.state.phase);
+      if (ph !== 'run') {
+        await page.keyboard.press('r');
+        await page.waitForFunction(() => window.__nova.state.phase === 'run', null, { timeout: 5000 });
+      }
+      const x0 = (await page.evaluate(() => window.__nova.info().screen)).x;
+      await page.keyboard.down(key);
+      let ok = false;
+      try {
+        // waitForFunction passes ONE arg: destructure the pair.
+        await page.waitForFunction(([x, d]) => {
+          const i = window.__nova.info();
+          return d > 0 ? i.screen.x > x + 20 : i.screen.x < x - 20;
+        }, [x0, dir], { timeout: 20000 });
+        ok = true;
+      } catch { /* run may have ended mid-leg — retry fresh below */ }
+      await page.keyboard.up(key);
+      const x1 = (await page.evaluate(() => window.__nova.info().screen)).x;
+      if (ok && ((dir > 0 && x1 > x0 + 20) || (dir < 0 && x1 < x0 - 20))) return { x0, x1 };
+      if (attempt === 0) console.log(`render-check: ${key} leg interrupted (run ended?) — restarting fresh and retrying`);
+    }
+    throw new Error(`${key} did not move the ship on screen after a fresh retry`);
   }
-  const scrL = await page.evaluate(() => window.__nova.info().screen);
-  if (!(scrL.x < scr0.x - 20)) {
-    throw new Error(`ArrowLeft did not move the ship left on screen: ${scr0.x.toFixed(0)} -> ${scrL.x.toFixed(0)}`);
-  }
-  console.log(`render-check: ArrowLeft moves the ship left on screen (${scr0.x.toFixed(0)} -> ${scrL.x.toFixed(0)})`);
-  await page.keyboard.down('ArrowRight');
-  try {
-    await page.waitForFunction((x0) => window.__nova.info().screen.x > x0 + 20, scrL.x, { timeout: 20000 });
-  } finally {
-    await page.keyboard.up('ArrowRight');
-  }
-  const scrR = await page.evaluate(() => window.__nova.info().screen);
-  if (!(scrR.x > scrL.x + 20)) {
-    throw new Error(`ArrowRight did not move the ship right on screen: ${scrL.x.toFixed(0)} -> ${scrR.x.toFixed(0)}`);
-  }
-  console.log(`render-check: ArrowRight moves the ship right on screen (${scrL.x.toFixed(0)} -> ${scrR.x.toFixed(0)})`);
+  const left = await moveScreen('ArrowLeft', -1);
+  console.log(`render-check: ArrowLeft moves the ship left on screen (${left.x0.toFixed(0)} -> ${left.x1.toFixed(0)})`);
+  const right = await moveScreen('ArrowRight', 1);
+  console.log(`render-check: ArrowRight moves the ship right on screen (${right.x0.toFixed(0)} -> ${right.x1.toFixed(0)})`);
 
   // M3: speed FOV kick — flying fast widens the view, and it settles
-  // back to exactly 55 when the ship slows.
-  await page.keyboard.down('ArrowRight');
-  try {
-    await page.waitForFunction(() => window.__nova.info().ship.speed > 10, null, { timeout: 20000 });
-  } finally {
+  // back to exactly 55 when the ship slows. Same swarm hazard as the
+  // movement legs: restart fresh and retry once if the run ends.
+  let fastFov = null;
+  for (let attempt = 0; attempt < 2 && fastFov === null; attempt++) {
+    const ph = await page.evaluate(() => window.__nova.state.phase);
+    if (ph !== 'run') {
+      await page.keyboard.press('r');
+      await page.waitForFunction(() => window.__nova.state.phase === 'run', null, { timeout: 5000 });
+    }
+    await page.keyboard.down('ArrowRight');
+    try {
+      await page.waitForFunction(() => window.__nova.info().ship.speed > 10, null, { timeout: 20000 });
+      fastFov = await page.evaluate(() => window.__nova.info().fov);
+    } catch { /* run may have ended — retry fresh */ }
     await page.keyboard.up('ArrowRight');
   }
-  const fastFov = await page.evaluate(() => window.__nova.info().fov);
+  if (fastFov === null) throw new Error('could not get the ship fast (run kept ending)');
   if (!(fastFov > 56)) throw new Error(`speed FOV kick missing: fov ${fastFov.toFixed(2)} at speed > 10 (want > 56)`);
   console.log(`render-check: speed FOV kick fires (fov ${fastFov.toFixed(2)} while fast)`);
   await page.waitForFunction(() => {
@@ -328,6 +374,19 @@ try {
   }
   console.log(`render-check: dash bundle complete (${dashLog[dashLog.length - 1].layers.join(', ')})`);
 
+  // M4: the canvas must actually update during a run. A frozen
+  // render (e.g. an exception in the frame loop skipping
+  // renderer.render) still leaves the sim state looking alive — the
+  // ship moves, kills land, the HUD updates — so assert the pixels
+  // change while the ship flies. (This caught a real M4 bug: a
+  // missing import made updateHUD throw every frame, freezing the
+  // canvas from the first run frame on.)
+  const shotA = await page.screenshot();
+  await page.waitForTimeout(1000);
+  const shotB = await page.screenshot();
+  if (shotA.equals(shotB)) throw new Error('canvas did not change between two screenshots during a run — the render loop may be frozen');
+  console.log('render-check: canvas updates during a run (two screenshots differ)');
+
   // Gameplay screenshot for the by-eye check.
   await page.screenshot({ path: path.join(SHOTS_DIR, 'gameplay-1280x720.png') });
   console.log(`render-check: gameplay screenshot saved to ${SHOTS_DIR}/gameplay-1280x720.png — INSPECT BY EYE (3D depth, arena, HUD)`);
@@ -363,7 +422,15 @@ try {
   if (!waveEntry || waveEntry.layers.length !== 7) {
     throw new Error(`waveClear feedback bundle incomplete: ${JSON.stringify(waveEntry)}`);
   }
-  if (!fbWave.audio || !fbWave.audio.lead) throw new Error('music lead should be on from wave 2');
+  if (!fbWave.audio || !fbWave.audio.lead) {
+    // The lead joins on the sequencer's next step after wave 2 starts
+    // (90ms interval, slower under swiftshader load) — wait for it
+    // rather than asserting on the instant the wave flips.
+    await page.waitForFunction(() => {
+      const i = window.__nova.info();
+      return i.audio && i.audio.lead;
+    }, null, { timeout: 15000 });
+  }
   console.log(`render-check: waveClear bundle complete (${waveEntry.layers.join(', ')}), music lead on`);
   await page.evaluate(() => window.__nova.autopilot(false));
 
@@ -390,6 +457,22 @@ try {
   await page.evaluate(() => window.__nova.setReduceFlashing(true));
   let flashOff = null, flashOn = null;
   for (let attempt = 0; attempt < 4 && (flashOff === null || flashOn === null); attempt++) {
+    // Arm an in-page observer before the hit: the flash lasts only
+    // 120ms and the main thread can be busy rendering for longer
+    // under swiftshader, so polling the class from outside can miss
+    // it entirely. The observer records the class change as a
+    // microtask and never misses it. (The game behaviour is unchanged
+    // since M3 — this is the test's observation method, not the flash.)
+    await page.evaluate(() => {
+      window.__flashSeen = false;
+      if (!window.__flashObserver) {
+        const el = document.getElementById('hit-flash');
+        window.__flashObserver = new MutationObserver(() => {
+          if (el.classList.contains('show')) window.__flashSeen = true;
+        });
+        window.__flashObserver.observe(el, { attributes: true, attributeFilter: ['class'] });
+      }
+    });
     const shieldsNow = await page.evaluate(() => window.__nova.info().shields);
     await page.evaluate(() => window.__nova.seekEnemy(true));
     const h = await page.waitForFunction((sh) => {
@@ -402,15 +485,22 @@ try {
     }, shieldsNow, { timeout: 60000, polling: 50 }).catch(() => null);
     await page.evaluate(() => window.__nova.seekEnemy(false));
     if (h) {
-      const got = await h.jsonValue();
+      await h.jsonValue();
+      const seen = await page.evaluate(() => window.__flashSeen);
       if (flashOff === null) {
-        flashOff = got.flash;
+        flashOff = seen;
         await page.evaluate(() => window.__nova.setReduceFlashing(false));
       } else if (flashOn === null) {
-        flashOn = got.flash;
+        flashOn = seen;
       }
     }
-    await page.waitForTimeout(4000); // invulnerability is 1.5s of game time
+    // No passive wait between hits: a ship sitting still in the
+    // middle of the swarm takes the next hits during the wait (and
+    // can die before the second seek even starts). Seek immediately —
+    // the 1.5s of game-time invulnerability from the last hit covers
+    // the start of the seek, and the ship takes the next hit while
+    // moving, one invulnerability window at a time.
+    await page.waitForTimeout(300); // let the hit-stop settle
   }
   if (flashOff === null || flashOn === null) throw new Error(`could not land two hits to test the flash toggle (off: ${flashOff}, on: ${flashOn})`);
   if (flashOff) throw new Error('reduce-flashing ON must suppress the hit flash');
@@ -516,12 +606,128 @@ try {
   }
   console.log(`render-check: best score saved for wave set 1 (${saved.best[1].score.toLocaleString()}), menu shows it`);
 
+  // M4 campaign: the autopilot clears set 1 in campaign mode. The
+  // upgrade screen must open (not the set-complete screen), buying a
+  // card must spend energy and apply the upgrade, and continuing
+  // must start set 2 with the loadout carried in. Under swiftshader
+  // a full set-1 clear takes minutes of real time, so the waits are
+  // long polls, not fixed windows.
+  await page.evaluate(() => window.__nova.startCampaign());
+  await page.waitForFunction(() => window.__nova.state.phase === 'run' && window.__nova.state.mode === 'campaign', null, { timeout: 5000 });
+  console.log('render-check: campaign started (mode campaign, set 1)');
+  await page.evaluate(() => window.__nova.autopilot(true));
+  await page.waitForFunction(() => window.__nova.state.phase === 'upgrade', null, { timeout: 420000 });
+  await page.evaluate(() => window.__nova.autopilot(false));
+  const upgTitle = await page.textContent('#upgrade-title');
+  if (!upgTitle.includes('cleared')) throw new Error(`upgrade screen title wrong: ${upgTitle}`);
+  const upgCards = await page.locator('#upgrade-cards .upgrade-card').count();
+  if (upgCards !== 3) throw new Error(`expected 3 upgrade cards, got ${upgCards}`);
+  const upgEnergy = await page.textContent('#upgrade-energy');
+  console.log(`render-check: upgrade screen opened after campaign set 1 (${upgTitle}; ${upgEnergy})`);
+  // Buy the first affordable card and prove the purchase landed:
+  // energy drops by the card's cost and the campaign loadout gains
+  // the upgrade. If nothing is affordable, continue unupgraded.
+  const cardStates = await page.evaluate(() => [...document.querySelectorAll('#upgrade-cards .upgrade-card')].map((c) => ({
+    name: c.querySelector('.upgrade-name').textContent,
+    cost: c.querySelector('.upgrade-cost').textContent,
+    affordable: !c.classList.contains('unaffordable') && !c.classList.contains('maxed'),
+  })));
+  const buyIdx = cardStates.findIndex((c) => c.affordable);
+  // Draft guarantee: with at least the cheapest upgrade's cost in
+  // energy (Magnet Core 5), some offered card must be affordable.
+  const campEnergy = (await page.evaluate(() => window.__nova.campaign())).energy;
+  if (campEnergy >= 5 && buyIdx < 0) throw new Error(`draft guarantee broken: energy ${campEnergy} but no affordable card (${JSON.stringify(cardStates.map((c) => c.cost))})`);
+  let boughtName = null;
+  if (buyIdx >= 0) {
+    const before = await page.evaluate(() => window.__nova.campaign());
+    const energyBefore = before.energy;
+    await page.locator('#upgrade-cards .upgrade-card').nth(buyIdx).click();
+    await page.waitForTimeout(300);
+    const after = await page.evaluate(() => window.__nova.campaign());
+    boughtName = cardStates[buyIdx].name;
+    const boughtId = Object.keys(after.upgrades).find((id) => !(before.upgrades[id] || 0) || after.upgrades[id] > before.upgrades[id]);
+    if (!boughtId) throw new Error(`buying ${boughtName} did not change the campaign loadout`);
+    if (!(after.energy < energyBefore)) throw new Error(`buying ${boughtName} did not spend energy (${energyBefore} -> ${after.energy})`);
+    console.log(`render-check: bought ${boughtName} (energy ${energyBefore} -> ${after.energy}, loadout ${JSON.stringify(after.upgrades)})`);
+    // Regression: the energy line must show the post-purchase balance,
+    // and a card that is no longer affordable must not spend anything
+    // (the screen used to read the finished run's stale energy, so a
+    // second buy could double-spend it).
+    const upgEnergyAfter = await page.textContent('#upgrade-energy');
+    if (!upgEnergyAfter.includes(`Energy: ${after.energy}`)) throw new Error(`upgrade energy line stale after buy: ${upgEnergyAfter} (expected Energy: ${after.energy})`);
+    const staleStates = await page.evaluate(() => [...document.querySelectorAll('#upgrade-cards .upgrade-card')].map((c) => c.classList.contains('unaffordable')));
+    const staleIdx = staleStates.findIndex(Boolean);
+    if (staleIdx >= 0) {
+      await page.locator('#upgrade-cards .upgrade-card').nth(staleIdx).click();
+      await page.waitForTimeout(300);
+      const afterStale = await page.evaluate(() => window.__nova.campaign());
+      if (afterStale.energy !== after.energy || JSON.stringify(afterStale.upgrades) !== JSON.stringify(after.upgrades)) {
+        throw new Error(`unaffordable card click spent energy or changed loadout (${after.energy} -> ${afterStale.energy})`);
+      }
+      console.log(`render-check: unaffordable card click spent nothing (energy stays ${after.energy})`);
+    }
+  } else {
+    console.log(`render-check: no affordable upgrade card (${JSON.stringify(cardStates.map((c) => c.cost))}) — continuing unupgraded`);
+  }
+  await page.screenshot({ path: path.join(SHOTS_DIR, 'upgrade-1280x720.png') });
+  console.log('render-check: upgrade screenshot saved — INSPECT BY EYE (3 cards, energy, owned line)');
+  await page.click('#btn-upgrade-continue');
+  await page.waitForFunction(() => {
+    const i = window.__nova.info();
+    return window.__nova.state.phase === 'run' && i.setId === 2 && i.mode === 'campaign';
+  }, null, { timeout: 10000 });
+  const camp2 = await page.evaluate(() => window.__nova.info());
+  if (boughtName && Object.keys(camp2.upgrades).length === 0) {
+    throw new Error('campaign set 2 started without the bought upgrade');
+  }
+  console.log(`render-check: campaign continued into set 2 (mode ${camp2.mode}, upgrades ${JSON.stringify(camp2.upgrades)}, energy ${camp2.energy})`);
+
+  // Back to the menu: the gates must now be open — set 2 unlocked
+  // by the campaign clear, and Survival unlocked by clearing set 1.
+  await page.keyboard.press('p');
+  await page.waitForFunction(() => window.__nova.state.phase === 'paused', null, { timeout: 5000 });
+  await page.click('#btn-quit');
+  await page.waitForFunction(() => window.__nova.state.phase === 'menu', null, { timeout: 5000 });
+  const unlocks1 = await page.evaluate(() => window.__nova.unlocks());
+  if (!unlocks1.sets[2] || !unlocks1.survival) {
+    throw new Error(`clearing set 1 should unlock set 2 and Survival: ${JSON.stringify(unlocks1)}`);
+  }
+  if (await page.isDisabled('#btn-survival')) throw new Error('Survival button should be enabled after clearing set 1');
+  const campLabel = await page.textContent('#btn-campaign');
+  if (!campLabel.includes('Set 2')) throw new Error(`campaign button should show the next set, got: ${campLabel}`);
+  console.log(`render-check: gates opened — set 2 unlocked, Survival unlocked, campaign button reads "${campLabel.trim()}"`);
+
+  // M4 survival: the Survival button starts an endless run — mode
+  // survival, wave 1, and the run does not end when wave 1 clears.
+  await page.click('#btn-survival');
+  await page.waitForFunction(() => window.__nova.state.phase === 'run' && window.__nova.state.mode === 'survival', null, { timeout: 5000 });
+  const surv = await page.evaluate(() => window.__nova.info());
+  if (surv.setId !== 0 || surv.waves !== 0) throw new Error(`survival run should be set 0 with no wave list, got setId ${surv.setId}, waves ${surv.waves}`);
+  // The HUD updates on the next frame after the run starts — wait
+  // for it rather than reading the stale label of the previous run.
+  await page.waitForFunction(() => document.getElementById('hud-wave').textContent === 'Wave 1', null, { timeout: 5000 });
+  const hudWave = await page.textContent('#hud-wave');
+  if (hudWave !== 'Wave 1') throw new Error(`survival HUD should show just the wave number, got: ${hudWave}`);
+  await page.evaluate(() => window.__nova.autopilot(true));
+  await page.waitForFunction(() => window.__nova.info().waveIndex >= 1, null, { timeout: 240000 });
+  const surv2 = await page.evaluate(() => window.__nova.info());
+  await page.evaluate(() => window.__nova.autopilot(false));
+  if (surv2.done) throw new Error('survival must not end when a wave clears');
+  console.log(`render-check: survival runs — wave 1 cleared, now wave ${surv2.waveIndex + 1}, score ${surv2.score}, still going`);
+  await page.keyboard.press('p');
+  await page.waitForFunction(() => window.__nova.state.phase === 'paused', null, { timeout: 5000 });
+  await page.click('#btn-quit');
+  await page.waitForFunction(() => window.__nova.state.phase === 'menu', null, { timeout: 5000 });
+  const survBest = await page.evaluate(() => window.__nova.save().best.survival);
+  if (!survBest || survBest.score <= 0) throw new Error(`survival best should be saved: ${JSON.stringify(survBest)}`);
+  console.log(`render-check: survival best saved (${survBest.score.toLocaleString()}, ${survBest.waves} waves)`);
+
   if (errors.length) {
     console.error('render-check: console/page errors:');
     for (const e of errors) console.error('  ' + e);
     throw new Error(`${errors.length} console/page error(s)`);
   }
-  console.log('render-check: PASS — menu, movement, screen-space aim, firing, dash, kill, wave clear, shield loss, run-over, zero console errors');
+  console.log('render-check: PASS — menu, M4 gates, movement, screen-space aim, firing, dash, kill, wave clear, shield loss, run-over, campaign upgrade flow, survival, zero console errors');
 } finally {
   if (browser) await browser.close();
   server.close();

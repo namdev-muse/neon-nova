@@ -1,4 +1,4 @@
-// Neon Nova v0.3.0 — Node smoke tests for physics.js (no DOM, no Three.js).
+// Neon Nova v0.4.0 — Node smoke tests for physics.js (no DOM, no Three.js).
 import {
   VERSION, WAVE_SETS, waveSetById, totalEnemiesInSet, setThreat, comboMultiplier,
   createRun, startRun, stepRun, simulateRun, stationaryPolicy, greedyPolicy,
@@ -6,6 +6,9 @@ import {
   FIRE_INTERVAL, BULLET_SPEED, DASH_COOLDOWN, DASH_DURATION, DASH_SPEED,
   STUN_SECONDS, INVULN_SECONDS, COMBO_WINDOW, WAVE_CLEAR_SCORE, SET_CLEAR_SCORE,
   PICKUP_SCORE, ENEMY_DEFS, FEEDBACK, FEEDBACK_TIERS, FEEDBACK_LAYERS,
+  UPGRADES, UPGRADE_ORDER, upgradeStats, upgradeLevel, upgradeCost, applyUpgrade,
+  makeSurvivalSet, generateSurvivalWave, survivalWaveThreat,
+  isSetUnlocked, isSurvivalUnlocked, defaultCampaign,
   mulberry32, clamp, defaultSave, serializeSave, parseSave, recordBest, SAVE_VERSION,
 } from '../physics.js';
 
@@ -17,7 +20,7 @@ function check(name, cond) {
 }
 function approx(a, b, eps = 1e-9) { return Math.abs(a - b) <= eps; }
 
-check('physics version is 0.3.0', VERSION === '0.3.0');
+check('physics version is 0.4.0', VERSION === '0.4.0');
 check('12 wave sets defined', WAVE_SETS.length === 12);
 check('wave set ids are 1..12 in order', WAVE_SETS.every((s, i) => s.id === i + 1));
 check('every wave set has a name and a hint', WAVE_SETS.every((s) => s.name && s.hint));
@@ -158,6 +161,115 @@ check('mini is faster than the chaser it comes from', ENEMY_DEFS.mini.speed > EN
     stepRun(run2, { mx: 0, mz: 0, aimX: 10, aimZ: 0, fire: false, dash: false }, 1 / 60);
   }
   check('combo resets after the window with no kill', run2.combo === 0);
+}
+// Combo window tightened in M4 (3.5 -> 2.5): the multiplier sat at x4
+// from wave 2 on for a decent player, so kills must come closer
+// together to hold it.
+check('combo window is 2.5s (M4 economy tuning)', COMBO_WINDOW === 2.5);
+
+// --- upgrades (M4) ---
+{
+  check('six upgrades defined', Object.keys(UPGRADES).length === 6);
+  check('upgrade order covers every upgrade', UPGRADE_ORDER.length === 6
+    && UPGRADE_ORDER.every((id) => UPGRADES[id]));
+  for (const [id, u] of Object.entries(UPGRADES)) {
+    check(`${id} has a name, a description and a cost per level`,
+      u.name && u.desc && Array.isArray(u.cost) && u.cost.length === u.max);
+    check(`${id} costs rise with level`, u.cost.every((c, i) => i === 0 || c > u.cost[i - 1]));
+    check(`${id} costs are all positive`, u.cost.every((c) => c > 0));
+  }
+  check('total cost of everything is 163 (a campaign cannot max it all)',
+    Object.values(UPGRADES).reduce((n, u) => n + u.cost.reduce((a, b) => a + b, 0), 0) === 163);
+  const stock = upgradeStats({});
+  check('stock ship has the base fire interval', approx(stock.fireInterval, FIRE_INTERVAL));
+  check('stock ship fires one bullet', stock.bullets === 1);
+  check('stock ship deals 1 damage', stock.damage === 1);
+  check('stock ship has the base dash cooldown', approx(stock.dashCooldown, DASH_COOLDOWN));
+  check('stock ship magnet radius is 5', stock.magnetRadius === 5);
+  check('stock ship has 3 shields', stock.maxShields === SHIELDS);
+  const maxed = upgradeStats({ rapid: 3, twin: 2, heavy: 1, hull: 2, dash: 2, magnet: 2 });
+  check('max rapid fire is ~39% faster', approx(maxed.fireInterval, FIRE_INTERVAL * Math.pow(0.85, 3)));
+  check('max twin shot fires 3 bullets', maxed.bullets === 3);
+  check('heavy rounds deal 2 damage', maxed.damage === 2);
+  check('max dash recharge is ~44% faster', approx(maxed.dashCooldown, DASH_COOLDOWN * Math.pow(0.75, 2)));
+  check('max magnet radius is 13', maxed.magnetRadius === 13);
+  check('max hull gives 5 shields', maxed.maxShields === 5);
+  check('upgradeLevel clamps to the max', upgradeLevel({ rapid: 9 }, 'rapid') === 3);
+  check('upgradeLevel of an unknown id is 0', upgradeLevel({}, 'nope') === 0);
+  check('upgradeCost is null at max level', upgradeCost('heavy', 1) === null);
+  check('upgradeCost is the next level price', upgradeCost('rapid', 0) === 8 && upgradeCost('rapid', 2) === 16);
+  const bought = applyUpgrade({}, 'rapid', 10);
+  check('buying rapid fire spends 8 energy and leaves 2', bought && bought.energy === 2 && bought.cost === 8 && bought.level === 1);
+  check('buying does not mutate the input loadout', JSON.stringify({}) === '{}');
+  check('cannot buy without enough energy', applyUpgrade({}, 'rapid', 5) === null);
+  check('cannot buy past the max', applyUpgrade({ heavy: 1 }, 'heavy', 99) === null);
+  check('cannot buy an unknown upgrade', applyUpgrade({}, 'nope', 99) === null);
+}
+
+// --- upgrades change the run ---
+{
+  const run = startRun(WAVE_SETS[0], { upgrades: { twin: 1, heavy: 1, hull: 1, dash: 1 } });
+  check('upgraded run starts with 4 shields', run.shields === 4 && run.maxShields === 4);
+  check('upgraded run fires faster on dash cooldown', approx(run.dashCooldown, DASH_COOLDOWN * 0.75));
+  check('upgraded run deals 2 damage', run.bulletDamage === 2);
+  stepRun(run, { mx: 0, mz: 0, aimX: 10, aimZ: 0, fire: true, dash: false }, 1 / 60);
+  check('twin shot spawns two bullets', run.bullets.length === 2);
+  check('twin shot bullets spread slightly', Math.abs(run.bullets[0].vz - run.bullets[1].vz) > 0.001);
+  // A shooter (2 hp) dies to one heavy round.
+  const run2 = startRun(WAVE_SETS[0], { upgrades: { heavy: 1 } });
+  run2.enemies.push({
+    id: 99, type: 'shooter', x: 8, z: 0, vx: 0, vz: 0,
+    hp: 2, maxHp: 2, r: 1.1, speed: 6, fireCd: 99, telegraph: false, spawnT: 0,
+  });
+  for (let i = 0; i < 60 && run2.kills === 0; i++) {
+    stepRun(run2, { mx: 0, mz: 0, aimX: 8, aimZ: 0, fire: true, dash: false }, 1 / 60);
+  }
+  check('heavy rounds kill a 2-hp shooter in one hit', run2.kills === 1);
+  // Campaign carry-in: score and energy start where the campaign left off.
+  const run3 = startRun(WAVE_SETS[0], { mode: 'campaign', score: 5000, energy: 12, upgrades: { magnet: 1 } });
+  check('campaign run carries score in', run3.score === 5000 && run3.scoreAtStart === 5000);
+  check('campaign run carries energy in', run3.energy === 12);
+  check('campaign run magnet radius is 9', run3.magnetRadius === 9);
+  check('campaign run mode is campaign', run3.mode === 'campaign');
+}
+
+// --- survival mode (M4) ---
+{
+  const s = makeSurvivalSet(42);
+  check('survival set is flagged survival with id 0', s.survival === true && s.id === 0);
+  check('survival wave 1 is chasers only', generateSurvivalWave(0).groups.every((g) => g.type === 'chaser'));
+  check('survival wave 1 is two staggered groups (no single unfair wall)',
+    generateSurvivalWave(0).groups.length === 2 && generateSurvivalWave(0).groups[1].delay === 1.5);
+  check('survival wave 2 introduces shooters', generateSurvivalWave(1).groups.some((g) => g.type === 'shooter'));
+  check('survival wave 3 introduces splitters', generateSurvivalWave(2).groups.some((g) => g.type === 'splitter'));
+  check('survival threat strictly increases over the first 12 waves',
+    Array.from({ length: 12 }, (_, n) => survivalWaveThreat(n)).every((t, i, a) => i === 0 || t > a[i - 1]));
+  check('survival wave 10 is about as threatening as a set-12 wave',
+    survivalWaveThreat(9) >= 30 && survivalWaveThreat(9) <= 45);
+  check('survival waves are deterministic for the same wave number',
+    JSON.stringify(generateSurvivalWave(7)) === JSON.stringify(generateSurvivalWave(7)));
+  const run = startRun(s, { mode: 'survival' });
+  check('survival run never completes a set (endless)', run.set.survival === true);
+  // Wave-clear bonus grows with the wave number in survival.
+  const r2 = startRun(s, { mode: 'survival' });
+  r2.waveIndex = 4;
+  r2.spawnQueue = [];
+  r2.enemies = [];
+  stepRun(r2, { mx: 0, mz: 0, aimX: 10, aimZ: 0, fire: false, dash: false }, 1 / 60);
+  check('survival wave 5 clear pays 250 + 50*4', r2.score === WAVE_CLEAR_SCORE + 50 * 4);
+  check('survival keeps going after a wave clear (breather, not done)', r2.waveState === 'breather' && !r2.done);
+}
+
+// --- unlock gates (M4) ---
+{
+  check('set 1 is always unlocked', isSetUnlocked({}, 1));
+  check('set 2 is locked on a fresh save', !isSetUnlocked({}, 2));
+  check('set 2 unlocks when set 1 is cleared', isSetUnlocked({ 1: { score: 100, waves: 4 } }, 2));
+  check('set 2 stays locked when set 1 is only partly cleared', !isSetUnlocked({ 1: { score: 100, waves: 3 } }, 2));
+  check('set 12 unlocks only when set 11 is cleared', !isSetUnlocked({ 11: { score: 1, waves: 4 } }, 12)
+    && isSetUnlocked({ 11: { score: 1, waves: 5 } }, 12));
+  check('survival is locked on a fresh save', !isSurvivalUnlocked({}));
+  check('survival unlocks when set 1 is cleared', isSurvivalUnlocked({ 1: { score: 100, waves: 4 } }));
 }
 
 // --- splitter bursts into minis ---
@@ -349,8 +461,12 @@ check('shoot, kill and pickup are small with no hit-stop',
 // --- save round-trip ---
 {
   const save = defaultSave();
-  check('default save has schema version 1', save.version === SAVE_VERSION);
+  check('default save has schema version 2', save.version === SAVE_VERSION);
   check('default save has no bests', Object.keys(save.best).length === 0);
+  check('default save has a fresh campaign', JSON.stringify(save.campaign) === JSON.stringify(defaultCampaign()));
+  check('default campaign starts at set 1 with nothing banked',
+    save.campaign.nextSet === 1 && save.campaign.score === 0 && save.campaign.energy === 0
+    && Object.keys(save.campaign.upgrades).length === 0 && save.campaign.best === 0);
   recordBest(save, 1, 1234, 3);
   check('recordBest stores score and waves', save.best[1].score === 1234 && save.best[1].waves === 3);
   recordBest(save, 1, 900, 4);
@@ -359,10 +475,13 @@ check('shoot, kill and pickup are small with no hit-stop',
   check('recordBest stores bests for set 6', save.best[6].score === 99999 && save.best[6].waves === 5);
   recordBest(save, 12, 72745, 5);
   check('recordBest stores bests for set 12', save.best[12].score === 72745 && save.best[12].waves === 5);
+  recordBest(save, 'survival', 54321, 9);
+  check('recordBest stores a survival best (score + waves survived)', save.best.survival.score === 54321 && save.best.survival.waves === 9);
   const back = parseSave(serializeSave(save));
   check('save round-trips bests', back.best[1].score === 1234 && back.best[1].waves === 4);
   check('save round-trips set 6 bests', back.best[6].score === 99999 && back.best[6].waves === 5);
   check('save round-trips set 12 bests', back.best[12].score === 72745 && back.best[12].waves === 5);
+  check('save round-trips the survival best', back.best.survival.score === 54321 && back.best.survival.waves === 9);
   check('garbage save text falls back to defaults', parseSave('not json').version === SAVE_VERSION);
   check('save drops bests for unknown sets', Object.keys(parseSave('{"best":{"99":{"score":1,"waves":1}}}').best).length === 0);
   check('save clamps absurd scores', parseSave('{"best":{"1":{"score":99999999,"waves":9}}}').best[1].score === 10000000);
@@ -373,6 +492,15 @@ check('shoot, kill and pickup are small with no hit-stop',
     parseSave('{"music":false,"sfx":false,"volume":0.3}').music === false
     && parseSave('{"music":false,"sfx":false,"volume":0.3}').sfx === false
     && parseSave('{"music":false,"sfx":false,"volume":0.3}').volume === 0.3);
+  // Campaign save validation.
+  const camp = parseSave('{"campaign":{"nextSet":5,"score":12345,"energy":37,"upgrades":{"rapid":2,"twin":1,"nope":3},"best":99999}}');
+  check('save round-trips campaign progress', camp.campaign.nextSet === 5 && camp.campaign.score === 12345
+    && camp.campaign.energy === 37 && camp.campaign.best === 99999);
+  check('save round-trips campaign upgrades', camp.campaign.upgrades.rapid === 2 && camp.campaign.upgrades.twin === 1);
+  check('save drops unknown campaign upgrades', !('nope' in camp.campaign.upgrades));
+  check('save clamps campaign upgrades to the max', parseSave('{"campaign":{"upgrades":{"rapid":9}}}').campaign.upgrades.rapid === 3);
+  check('save clamps campaign nextSet', parseSave('{"campaign":{"nextSet":99}}').campaign.nextSet === 13);
+  check('save without a campaign field gets a fresh one', parseSave('{"best":{}}').campaign.nextSet === 1);
 }
 
 console.log(`\nsmoke: ${passed} passed, ${failed} failed`);
