@@ -9,7 +9,7 @@ the run ends. Clear every wave to finish the set. Score comes from kills
 × combo multiplier + wave bonuses — your best score is saved per wave set.
 
 **Live:** https://namdev-muse.github.io/neon-nova/
-**Version:** v0.1.0 (M1 core)
+**Version:** v0.2.0 (M2 wave craft)
 **Stack:** Three.js 0.160.0 (pinned via jsdelivr import map, no build step), vanilla HTML/CSS/JS, Web Audio synth SFX + generative music, GitHub Pages.
 
 ## Gameplay
@@ -31,12 +31,12 @@ with a short cooldown and a moment of invulnerability — spend it when
 the swarm closes in. Standing still is how you die: enemies spawn on a
 ring around the ship and close from every side, faster than one aim line
 can kill them. The bot harness proves it — the greedy combat bot
-completes all 6 wave sets, while sitting still and holding fire fails
-all 6.
+completes all 12 wave sets, while sitting still and holding fire fails
+all 12.
 
 ## Wave sets
 
-Six hand-crafted wave sets, each with its own identity (palette, enemy
+Twelve hand-crafted wave sets, each with its own identity (palette, enemy
 mix, spawn rhythm):
 
 | # | Wave set | Identity |
@@ -47,6 +47,12 @@ mix, spawn rhythm):
 | 4 | Pincer | Everything at once, from both flanks |
 | 5 | Swarm Tide | The tide does not stop — thin the swarm, chain the combo |
 | 6 | Nova Gauntlet | Everything you learned, all at once |
+| 7 | Bolt Storm | Shooter-heavy — bolts from every angle, never stop moving |
+| 8 | Split Flood | Splitter-heavy — every kill doubles the trouble |
+| 9 | Rolling Thunder | Staggered waves with no pause — find the rhythm and ride it |
+| 10 | Floodgate | Chaser floods in rolling waves — thin the flood before it reaches you |
+| 11 | Nova Siege | A siege in five acts — everything at once, and then more of it |
+| 12 | Final Nova | The final nova — the hardest set, everything at its peak |
 
 ## Controls
 
@@ -66,13 +72,13 @@ npm run screenshots   # README captures + 3-resolution size sweep (inspect by ey
 
 ## Tests
 
-- **Smoke (183 checks):** wave sets, movement momentum, aim, fire rate,
+- **Smoke (205 checks):** wave sets, movement momentum, aim, fire rate,
   dash, kills/combo/score, splitters, shooter bolts, shield loss,
   wave flow, determinism, the anti-slop gate, feedback tiers + layers,
   save round-trip.
 - **Bot:** the greedy combat bot (kites, leads its aim, dodges bolts,
-  dashes out of crushes) completes all 6 wave sets; sitting still and
-  holding fire fails all 6.
+  dashes out of crushes) completes all 12 wave sets; sitting still and
+  holding fire fails all 12.
 - **Render check:** headless Chromium — menu over a live 3D attract
   scene, Play starts a run, movement and aim asserted in *screen* space,
   firing, dash, kill, wave-1 clear, shield loss with the flashing

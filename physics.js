@@ -1,4 +1,4 @@
-// Neon Nova v0.1.0 — pure simulation core (no DOM, no Three.js).
+// Neon Nova v0.2.0 — pure simulation core (no DOM, no Three.js).
 // The ship flies freely in a bounded neon arena (angled top-down view);
 // the player moves with WASD/arrows (momentum), aims with the mouse,
 // fires to destroy waves of enemies, and dashes (Shift) through danger
@@ -13,7 +13,7 @@
 // move AND aim with real decisions; sitting still and holding fire
 // fails every wave set (see simulateRun + the bot harness).
 
-export const VERSION = '0.1.0';
+export const VERSION = '0.2.0';
 export const ARENA_HALF_X = 34;
 export const ARENA_HALF_Z = 20;
 export const SHIP_RADIUS = 0.9;
@@ -181,6 +181,78 @@ export const WAVE_SETS = [
       { groups: [{ type: 'chaser', count: 7, delay: 0 }, { type: 'shooter', count: 4, delay: 2 }, { type: 'splitter', count: 3, delay: 3.5 }] },
       { groups: [{ type: 'chaser', count: 8, delay: 0 }, { type: 'splitter', count: 4, delay: 1.5 }, { type: 'shooter', count: 5, delay: 3 }] },
       { groups: [{ type: 'chaser', count: 9, delay: 0 }, { type: 'splitter', count: 4, delay: 2 }, { type: 'shooter', count: 4, delay: 3.5 }] },
+    ],
+  },
+  {
+    id: 7, name: 'Bolt Storm', seed: 707,
+    hint: 'Shooters everywhere, bolts from every angle. Never stop moving — the storm does not aim twice.',
+    theme: { ring: '#fb7185', glow: '#be123c', accent: '#22d3ee', disc: '#2a0a12', tint: '#fecdd3' },
+    waves: [
+      { groups: [{ type: 'shooter', count: 5, delay: 0 }, { type: 'chaser', count: 7, delay: 1.5 }] },
+      { groups: [{ type: 'shooter', count: 7, delay: 0 }, { type: 'chaser', count: 8, delay: 1.5 }] },
+      { groups: [{ type: 'shooter', count: 8, delay: 0 }, { type: 'splitter', count: 2, delay: 1.5 }, { type: 'chaser', count: 8, delay: 3 }] },
+      { groups: [{ type: 'shooter', count: 8, delay: 0 }, { type: 'chaser', count: 10, delay: 2 }, { type: 'splitter', count: 2, delay: 3.5 }] },
+      { groups: [{ type: 'shooter', count: 10, delay: 0 }, { type: 'chaser', count: 10, delay: 2 }, { type: 'splitter', count: 2, delay: 3.5 }] },
+    ],
+  },
+  {
+    id: 8, name: 'Split Flood', seed: 808,
+    hint: 'Splitters in waves. Every kill doubles the trouble — clear the minis before the next burst.',
+    theme: { ring: '#34d399', glow: '#047857', accent: '#f472b6', disc: '#04160f', tint: '#a7f3d0' },
+    waves: [
+      { groups: [{ type: 'splitter', count: 3, delay: 0 }, { type: 'chaser', count: 7, delay: 1.5 }] },
+      { groups: [{ type: 'splitter', count: 4, delay: 0 }, { type: 'chaser', count: 9, delay: 1.5 }] },
+      { groups: [{ type: 'splitter', count: 5, delay: 0 }, { type: 'shooter', count: 4, delay: 1.5 }, { type: 'chaser', count: 9, delay: 3 }] },
+      { groups: [{ type: 'splitter', count: 6, delay: 0 }, { type: 'chaser', count: 11, delay: 2 }] },
+      { groups: [{ type: 'splitter', count: 7, delay: 0 }, { type: 'shooter', count: 5, delay: 2 }, { type: 'chaser', count: 11, delay: 3.5 }] },
+    ],
+  },
+  {
+    id: 9, name: 'Rolling Thunder', seed: 909,
+    hint: 'Wave after wave with no pause between them. Find the rhythm and ride it.',
+    theme: { ring: '#f97316', glow: '#c2410c', accent: '#a78bfa', disc: '#1e0e04', tint: '#fed7aa' },
+    waves: [
+      { groups: [{ type: 'chaser', count: 6, delay: 0 }, { type: 'shooter', count: 2, delay: 1 }, { type: 'chaser', count: 5, delay: 2 }, { type: 'shooter', count: 2, delay: 3 }] },
+      { groups: [{ type: 'chaser', count: 7, delay: 0 }, { type: 'splitter', count: 2, delay: 1 }, { type: 'shooter', count: 3, delay: 2 }, { type: 'chaser', count: 6, delay: 3 }] },
+      { groups: [{ type: 'shooter', count: 4, delay: 0 }, { type: 'chaser', count: 7, delay: 1 }, { type: 'splitter', count: 2, delay: 2 }, { type: 'chaser', count: 7, delay: 3 }, { type: 'shooter', count: 3, delay: 4 }] },
+      { groups: [{ type: 'chaser', count: 8, delay: 0 }, { type: 'shooter', count: 4, delay: 1 }, { type: 'splitter', count: 3, delay: 2 }, { type: 'chaser', count: 8, delay: 3 }, { type: 'shooter', count: 3, delay: 4 }] },
+      { groups: [{ type: 'shooter', count: 5, delay: 0 }, { type: 'chaser', count: 9, delay: 1 }, { type: 'splitter', count: 3, delay: 2 }, { type: 'chaser', count: 9, delay: 3 }, { type: 'shooter', count: 4, delay: 4 }] },
+    ],
+  },
+  {
+    id: 10, name: 'Floodgate', seed: 1010,
+    hint: 'The floodgates open. Chasers, dozens of them — thin the flood before it reaches you.',
+    theme: { ring: '#e879f9', glow: '#a21caf', accent: '#2dd4bf', disc: '#22061f', tint: '#f5d0fe' },
+    waves: [
+      { groups: [{ type: 'chaser', count: 6, delay: 0 }, { type: 'chaser', count: 6, delay: 1.5 }, { type: 'chaser', count: 4, delay: 3 }, { type: 'shooter', count: 2, delay: 3 }] },
+      { groups: [{ type: 'chaser', count: 6, delay: 0 }, { type: 'chaser', count: 6, delay: 1.5 }, { type: 'chaser', count: 6, delay: 3 }, { type: 'splitter', count: 3, delay: 3 }] },
+      { groups: [{ type: 'chaser', count: 7, delay: 0 }, { type: 'chaser', count: 7, delay: 1.5 }, { type: 'chaser', count: 6, delay: 3 }, { type: 'shooter', count: 5, delay: 3 }] },
+      { groups: [{ type: 'chaser', count: 8, delay: 0 }, { type: 'chaser', count: 8, delay: 1.5 }, { type: 'chaser', count: 6, delay: 3 }, { type: 'splitter', count: 4, delay: 3 }, { type: 'shooter', count: 5, delay: 4.5 }] },
+      { groups: [{ type: 'chaser', count: 8, delay: 0 }, { type: 'chaser', count: 8, delay: 1.5 }, { type: 'chaser', count: 8, delay: 3 }, { type: 'splitter', count: 5, delay: 3 }, { type: 'shooter', count: 7, delay: 4.5 }] },
+    ],
+  },
+  {
+    id: 11, name: 'Nova Siege', seed: 1111,
+    hint: 'A siege in five acts. Everything at once, and then more of it.',
+    theme: { ring: '#38bdf8', glow: '#0369a1', accent: '#fbbf24', disc: '#04121f', tint: '#bae6fd' },
+    waves: [
+      { groups: [{ type: 'chaser', count: 9, delay: 0 }, { type: 'shooter', count: 4, delay: 1 }, { type: 'splitter', count: 2, delay: 2 }] },
+      { groups: [{ type: 'chaser', count: 11, delay: 0 }, { type: 'shooter', count: 6, delay: 1.5 }, { type: 'splitter', count: 3, delay: 3 }] },
+      { groups: [{ type: 'chaser', count: 13, delay: 0 }, { type: 'shooter', count: 7, delay: 1.5 }, { type: 'splitter', count: 4, delay: 3 }] },
+      { groups: [{ type: 'chaser', count: 15, delay: 0 }, { type: 'shooter', count: 8, delay: 2 }, { type: 'splitter', count: 5, delay: 3.5 }] },
+      { groups: [{ type: 'chaser', count: 17, delay: 0 }, { type: 'shooter', count: 9, delay: 2 }, { type: 'splitter', count: 6, delay: 3.5 }] },
+    ],
+  },
+  {
+    id: 12, name: 'Final Nova', seed: 1212,
+    hint: 'The final nova. Everything you have learned, at its hardest. Earn it.',
+    theme: { ring: '#f43f5e', glow: '#9f1239', accent: '#fbbf24', disc: '#20060c', tint: '#fecdd3' },
+    waves: [
+      { groups: [{ type: 'chaser', count: 10, delay: 0 }, { type: 'shooter', count: 5, delay: 1 }, { type: 'splitter', count: 3, delay: 2 }] },
+      { groups: [{ type: 'chaser', count: 12, delay: 0 }, { type: 'shooter', count: 6, delay: 1.5 }, { type: 'splitter', count: 4, delay: 3 }] },
+      { groups: [{ type: 'chaser', count: 14, delay: 0 }, { type: 'shooter', count: 8, delay: 1.5 }, { type: 'splitter', count: 5, delay: 3 }] },
+      { groups: [{ type: 'chaser', count: 8, delay: 0 }, { type: 'chaser', count: 8, delay: 1.5 }, { type: 'shooter', count: 9, delay: 2 }, { type: 'splitter', count: 6, delay: 3.5 }] },
+      { groups: [{ type: 'chaser', count: 9, delay: 0 }, { type: 'chaser', count: 9, delay: 1.5 }, { type: 'shooter', count: 6, delay: 2 }, { type: 'splitter', count: 4, delay: 3 }, { type: 'shooter', count: 4, delay: 4 }, { type: 'splitter', count: 3, delay: 4.5 }] },
     ],
   },
 ];
@@ -728,7 +800,7 @@ export function parseSave(text) {
     if (!s || typeof s !== 'object') return d;
     if (s.best && typeof s.best === 'object') {
       for (const [k, v] of Object.entries(s.best)) {
-        if (/^(?:[1-6])$/.test(k) && v && typeof v === 'object'
+        if (/^(?:[1-9]|1[0-2])$/.test(k) && v && typeof v === 'object'
           && Number.isFinite(v.score) && Number.isFinite(v.waves)) {
           d.best[k] = {
             score: clamp(Math.floor(v.score), 0, 10000000),
