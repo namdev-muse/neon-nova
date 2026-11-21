@@ -1,5 +1,45 @@
 # Neon Nova — devlog
 
+## M5 — Polish & robustness (v0.5.0, 2026-11-21)
+
+No new modes, no new enemies — this milestone is the game growing up.
+**Accessibility** is now real instead of half-wired: the high-contrast
+palette already existed in the CSS but nothing ever turned it on, so
+there is now a High contrast toggle in Settings, plus a Text size
+setting (Normal / Large / Extra large, 100/120/140% root font size).
+Both persist in the save and re-apply on boot. **Performance:** an FPS
+guard watches the frame rate during a run — sustained sub-45fps steps
+the render resolution down a ladder (pixel ratio 2 → 1.5 → 1.25 → 1,
+one step per 3s low window, no thrash), tells the player once per step,
+and restores full resolution when they return to the menu. The guard's
+decision is a pure function, unit-tested; the live wiring (level →
+renderer pixel ratio → restore on menu) is asserted in the render
+check. **Touch** got its first real verification: the stick drag moves
+the ship, the aim-side drag fires, the DASH button appears on first
+touch — all through the real pointer handlers. **Bugs fixed:** the
+set-clear toast no longer shows through the upgrade overlay (it is
+hidden whenever any screen opens — the M4 cosmetic where it overlapped
+the combo line at 2560 and in portrait), and "9. Rolling Thunder" no
+longer wraps to two lines in its menu card. **Cross-browser:** the
+render check now runs under Firefox as well as Chromium
+(`PW_BROWSER=firefox`).
+
+Result: smoke 304/304, bot completes all 12 sets, render check clean
+in Chromium and Firefox, size sweep inspected by eye at 1280x720,
+2560x1080 and 1080x2340 (menu, gameplay, settings, upgrade at 2560),
+real-browser probe cleared set 1 again — no M5 regression.
+
+### Known issues (M5)
+
+- Survival wave 1 is clearable by a perfect-aim stationary turret (M4)
+  — the run-level gate holds (dies in wave 2 at 7.6s).
+- Set 1 is still easy for a good player (M4) — the ramp lives in sets
+  2–12.
+- Campaign progress is kept in the local save only — no cloud sync.
+- The FPS guard is one-way during a run: it never steps back up
+  mid-run, only on returning to the menu. Deliberate — stepping up
+  again would thrash on a marginal device.
+
 ## M4 — Progression & depth (v0.4.0, 2026-11-21)
 
 The game now has a reason to come back. **Campaign** plays all 12 sets
