@@ -23,8 +23,9 @@ bought Magnet Core on the draft screen, carried the loadout into set
 2 and fought to wave 4 (39 kills, 23,550) before dying to the
 Crossfire shooters — an honest death, not a systematic one. FOV
 kicked 55 → 63.7, trauma peaked 0.84, every feedback bundle fired,
-zero console errors. Push: [commits] — live site verified serving
-v1.0.0 by curl + connector read-back; release tag v1.0.0 created.
+zero console errors. Push: 4 commits (039751c/57a56b1/85a6a44/
+f5ea8ae) — live site verified serving v1.0.0 by curl + connector
+read-back; release tag v1.0.0 created.
 
 ### Known issues (v1.0.0)
 
