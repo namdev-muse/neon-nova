@@ -1,4 +1,4 @@
-// Neon Nova v0.2.0 — headless Chromium render check.
+// Neon Nova v0.3.0 — headless Chromium render check.
 // Serves the game dir over local HTTP, loads it in headless Chromium, and
 // asserts the M1 core, by hook and by eye:
 //   - the menu renders over a LIVE 3D scene (the attract flight actually
@@ -128,8 +128,8 @@ try {
   }
 
   const version = await page.evaluate(() => window.__nova.version);
-  if (version !== '0.2.0') throw new Error(`expected version 0.2.0, got ${version}`);
-  console.log('render-check: game module initialised, version 0.2.0');
+  if (version !== '0.3.0') throw new Error(`expected version 0.3.0, got ${version}`);
+  console.log('render-check: game module initialised, version 0.3.0');
 
   // WebGL context exists and the canvas is on screen.
   const gl = await page.evaluate(() => {
@@ -145,7 +145,7 @@ try {
   // text anywhere the player can see.
   const menuText = await page.textContent('#menu');
   if (!menuText.includes('NEON NOVA')) throw new Error('menu title missing');
-  if (menuText.includes('v0.2.0') || menuText.includes('Three.js') || menuText.includes('0.160.0')) {
+  if (menuText.includes('v0.3.0') || menuText.includes('Three.js') || menuText.includes('0.160.0')) {
     throw new Error('menu shows version/engine text — it must live in the README only');
   }
   const playClass = await page.getAttribute('#btn-play', 'class');
@@ -236,6 +236,32 @@ try {
   }
   console.log(`render-check: ArrowRight moves the ship right on screen (${scrL.x.toFixed(0)} -> ${scrR.x.toFixed(0)})`);
 
+  // M3: speed FOV kick — flying fast widens the view, and it settles
+  // back to exactly 55 when the ship slows.
+  await page.keyboard.down('ArrowRight');
+  try {
+    await page.waitForFunction(() => window.__nova.info().ship.speed > 10, null, { timeout: 20000 });
+  } finally {
+    await page.keyboard.up('ArrowRight');
+  }
+  const fastFov = await page.evaluate(() => window.__nova.info().fov);
+  if (!(fastFov > 56)) throw new Error(`speed FOV kick missing: fov ${fastFov.toFixed(2)} at speed > 10 (want > 56)`);
+  console.log(`render-check: speed FOV kick fires (fov ${fastFov.toFixed(2)} while fast)`);
+  await page.waitForFunction(() => {
+    const i = window.__nova.info();
+    return (i.ship.speed < 2 && Math.abs(i.fov - 55) < 0.5) || window.__nova.state.phase !== 'run';
+  }, null, { timeout: 30000 });
+  const slowFov = await page.evaluate(() => window.__nova.info().fov);
+  console.log(`render-check: FOV settles back to 55 when slow (fov ${slowFov.toFixed(2)})`);
+  // If the swarm caught the ship during the settle wait, restart
+  // fresh before the aim test (aim is frozen once the run is over).
+  const phaseAfterMove = await page.evaluate(() => window.__nova.state.phase);
+  if (phaseAfterMove !== 'run') {
+    await page.keyboard.press('r');
+    await page.waitForFunction(() => window.__nova.state.phase === 'run', null, { timeout: 5000 });
+    console.log('render-check: run ended during the movement legs — restarted fresh for the aim test');
+  }
+
   // Aim is asserted in SCREEN space: the mouse screen position must
   // map to the aim direction the player sees. Move the mouse to the
   // right of the ship — the aim point must land near the mouse, on
@@ -294,6 +320,14 @@ try {
   }
   console.log(`render-check: dash works (cooldown ${dashInfo.dash.cd.toFixed(2)}s, invuln ${dashInfo.ship.invuln.toFixed(2)}s, speed ${Math.hypot(dashInfo.ship.vx, dashInfo.ship.vz).toFixed(1)})`);
 
+  // M3: the dash feedback bundle fired completely (sound, particles,
+  // shake, fovPulse, glowPulse) — read back from the feedback log.
+  const dashLog = await page.evaluate(() => window.__nova.info().feedback.filter((f) => f.type === 'dash'));
+  if (!dashLog.length || dashLog[dashLog.length - 1].layers.length !== 5) {
+    throw new Error(`dash feedback bundle incomplete: ${JSON.stringify(dashLog)}`);
+  }
+  console.log(`render-check: dash bundle complete (${dashLog[dashLog.length - 1].layers.join(', ')})`);
+
   // Gameplay screenshot for the by-eye check.
   await page.screenshot({ path: path.join(SHOTS_DIR, 'gameplay-1280x720.png') });
   console.log(`render-check: gameplay screenshot saved to ${SHOTS_DIR}/gameplay-1280x720.png — INSPECT BY EYE (3D depth, arena, HUD)`);
@@ -304,9 +338,33 @@ try {
   await page.waitForFunction(() => window.__nova.info().kills >= 1, null, { timeout: 120000 });
   const killed = await page.evaluate(() => window.__nova.info());
   console.log(`render-check: autopilot scores a kill (kills ${killed.kills}, score ${killed.score}, combo x${killed.multiplier.toFixed(1)})`);
+  // M3: the kill + shoot bundles fired completely.
+  const fbKill = await page.evaluate(() => window.__nova.info().feedback);
+  const killEntry = fbKill.filter((f) => f.type === 'kill').pop();
+  if (!killEntry || killEntry.layers.length !== 6) {
+    throw new Error(`kill feedback bundle incomplete: ${JSON.stringify(killEntry)}`);
+  }
+  const shootEntry = fbKill.filter((f) => f.type === 'shoot').pop();
+  if (!shootEntry || shootEntry.layers.length !== 5) {
+    throw new Error(`shoot feedback bundle incomplete: ${JSON.stringify(shootEntry)}`);
+  }
+  const bulletHitEntry = fbKill.filter((f) => f.type === 'bulletHit').pop();
+  if (!bulletHitEntry || bulletHitEntry.layers.length !== 4) {
+    throw new Error(`bulletHit feedback incomplete: ${JSON.stringify(bulletHitEntry)}`);
+  }
+  console.log(`render-check: kill bundle complete (${killEntry.layers.join(', ')}), shoot bundle complete, bulletHit fires tick + spark + enemy flash`);
   await page.waitForFunction(() => window.__nova.info().waveIndex >= 1, null, { timeout: 240000 });
   const waved = await page.evaluate(() => window.__nova.info());
   console.log(`render-check: autopilot clears wave 1 (now wave ${waved.waveIndex + 1}, score ${waved.score}, kills ${waved.kills})`);
+  // M3: the wave-clear bundle fired completely, and the music lead
+  // joined from wave 2 (the music gets busier as the run heats up).
+  const fbWave = await page.evaluate(() => window.__nova.info());
+  const waveEntry = fbWave.feedback.filter((f) => f.type === 'waveClear').pop();
+  if (!waveEntry || waveEntry.layers.length !== 7) {
+    throw new Error(`waveClear feedback bundle incomplete: ${JSON.stringify(waveEntry)}`);
+  }
+  if (!fbWave.audio || !fbWave.audio.lead) throw new Error('music lead should be on from wave 2');
+  console.log(`render-check: waveClear bundle complete (${waveEntry.layers.join(', ')}), music lead on`);
   await page.evaluate(() => window.__nova.autopilot(false));
 
   // Score pops fire at the event: a +score pop for the kill.
@@ -360,6 +418,25 @@ try {
   const hitAfter = await page.evaluate(() => window.__nova.info());
   console.log(`render-check: reduce-flashing — flash suppressed when ON, shown when OFF; shields now ${hitAfter.shields}`);
   if (hitAfter.shields >= 3) throw new Error('seeking an enemy did not cost a shield');
+  // M3: the hit bundle fired completely, and on the last shield the
+  // low-shield vignette shows (breathing, or static with
+  // reduce-flashing on).
+  const fbHit = await page.evaluate(() => window.__nova.info().feedback);
+  const hitEntry = fbHit.filter((f) => f.type === 'hit').pop();
+  if (!hitEntry || hitEntry.layers.length !== 8) {
+    throw new Error(`hit feedback bundle incomplete: ${JSON.stringify(hitEntry)}`);
+  }
+  console.log(`render-check: hit bundle complete (${hitEntry.layers.join(', ')})`);
+  if (hitAfter.shields !== 1) throw new Error(`expected exactly 1 shield left after two hits, got ${hitAfter.shields}`);
+  if (!hitAfter.lowShield) throw new Error('lowShield flag should be true on the last shield');
+  const vigShown = await page.evaluate(() => document.getElementById('low-shield').classList.contains('show'));
+  if (!vigShown) throw new Error('low-shield vignette should show on the last shield');
+  await page.evaluate(() => window.__nova.setReduceFlashing(true));
+  await page.waitForTimeout(300);
+  const vigStatic = await page.evaluate(() => document.getElementById('low-shield').classList.contains('static'));
+  if (!vigStatic) throw new Error('low-shield vignette should be static with reduce-flashing on');
+  await page.evaluate(() => window.__nova.setReduceFlashing(false));
+  console.log('render-check: low-shield vignette shows on last shield, static under reduce-flashing');
 
   // Pause focuses Resume; Enter resumes.
   await page.keyboard.press('p');
@@ -377,6 +454,30 @@ try {
     return window.__nova.state.phase === 'run' && i.waveIndex === 0 && i.shields === 3;
   }, null, { timeout: 5000 });
   console.log('render-check: R restarts the run (wave 1, 3 shields)');
+
+  // M3: rest state — pause on a fresh, unmoved run (ship speed 0, no
+  // events in flight) and confirm every effect settles back exactly:
+  // trauma 0, FOV 55, time scale 1, ship scale 1.25, vignette off.
+  await page.keyboard.press('p');
+  await page.waitForFunction(() => window.__nova.state.phase === 'paused', null, { timeout: 5000 });
+  await page.waitForFunction(() => {
+    const i = window.__nova.info();
+    return i.trauma < 0.02 && Math.abs(i.fov - 55) < 0.5 && i.timeScale === 1
+      && Math.abs(i.ship.scale - 1.25) < 0.01 && !i.lowShield;
+  }, null, { timeout: 15000 });
+  const rest = await page.evaluate(() => window.__nova.info());
+  console.log(`render-check: rest state clean (trauma ${rest.trauma.toFixed(3)}, fov ${rest.fov.toFixed(2)}, timeScale ${rest.timeScale}, ship scale ${rest.ship.scale.toFixed(2)}, vignette off)`);
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => window.__nova.state.phase === 'run', null, { timeout: 5000 });
+
+  // M3: shake toggle at 0 kills the shake even when events fire.
+  await page.evaluate(() => window.__nova.setShake(0));
+  await page.evaluate(() => window.__nova.dash());
+  await page.waitForFunction(() => window.__nova.info().dash.cd > 0, null, { timeout: 10000 });
+  const noShake = await page.evaluate(() => window.__nova.info().shakeAmp);
+  if (noShake !== 0) throw new Error(`shake 0 must give shakeAmp 0, got ${noShake}`);
+  await page.evaluate(() => window.__nova.setShake(1));
+  console.log('render-check: shake 0 suppresses shakeAmp even after a dash; restored to 1');
 
   // Losing all 3 shields ends the run: seek enemies repeatedly.
   let guard = 0;

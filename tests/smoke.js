@@ -1,4 +1,4 @@
-// Neon Nova v0.2.0 — Node smoke tests for physics.js (no DOM, no Three.js).
+// Neon Nova v0.3.0 — Node smoke tests for physics.js (no DOM, no Three.js).
 import {
   VERSION, WAVE_SETS, waveSetById, totalEnemiesInSet, setThreat, comboMultiplier,
   createRun, startRun, stepRun, simulateRun, stationaryPolicy, greedyPolicy,
@@ -17,7 +17,7 @@ function check(name, cond) {
 }
 function approx(a, b, eps = 1e-9) { return Math.abs(a - b) <= eps; }
 
-check('physics version is 0.2.0', VERSION === '0.2.0');
+check('physics version is 0.3.0', VERSION === '0.3.0');
 check('12 wave sets defined', WAVE_SETS.length === 12);
 check('wave set ids are 1..12 in order', WAVE_SETS.every((s, i) => s.id === i + 1));
 check('every wave set has a name and a hint', WAVE_SETS.every((s) => s.name && s.hint));
@@ -203,6 +203,10 @@ check('mini is faster than the chaser it comes from', ENEMY_DEFS.mini.speed > EN
   check('hit grants invulnerability', run.invuln > 0);
   check('hit fires a hit event', evs.some((e) => e.type === 'hit'));
   check('hit resets the combo', run.combo === 0);
+  // The rammer sits to the RIGHT of the ship: knockback must push the
+  // ship LEFT, away from the source (M3: the ram call used to pass the
+  // ship-to-enemy vector, shoving the ship into the rammer).
+  check('ram knockback pushes the ship away from the rammer', run.vx < -8);
   check('the ramming enemy dies with the hit (no double shield loss)',
     !run.enemies.some((e) => e.id === 96));
   // Invulnerability: a second chaser on top of the ship cannot hit again yet.
@@ -324,6 +328,11 @@ check('shoot, kill and pickup are small with no hit-stop',
     FEEDBACK_LAYERS.runOver.includes('hitStop')
     && FEEDBACK_LAYERS.runOver.includes('flash')
     && FEEDBACK_LAYERS.runOver.includes('knockback'));
+  check('hit carries knockback too (the sim impulses velocity away from the source)',
+    FEEDBACK_LAYERS.hit.includes('knockback'));
+  check('hit and runOver carry squash + toast',
+    FEEDBACK_LAYERS.hit.includes('squash') && FEEDBACK_LAYERS.hit.includes('toast')
+    && FEEDBACK_LAYERS.runOver.includes('squash') && FEEDBACK_LAYERS.runOver.includes('toast'));
   check('score events pop a number (kill/pickup/waveClear/setComplete)',
     ['kill', 'pickup', 'waveClear', 'setComplete'].every((k) => FEEDBACK_LAYERS[k].includes('pop')));
 }

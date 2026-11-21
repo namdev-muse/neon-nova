@@ -1,4 +1,4 @@
-// Neon Nova v0.2.0 — bot harness: the greedy combat bot plays every
+// Neon Nova v0.3.0 — bot harness: the greedy combat bot plays every
 // wave set to completion through the public stepRun + policy hooks, and
 // the anti-slop gate asserts sitting still and holding fire CANNOT
 // finish any wave set — if the bot could clear a set without moving,
