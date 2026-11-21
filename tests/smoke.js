@@ -1,4 +1,4 @@
-// Neon Nova v0.5.0 — Node smoke tests for physics.js (no DOM, no Three.js).
+// Neon Nova v1.0.0 — Node smoke tests for physics.js (no DOM, no Three.js).
 import {
   VERSION, WAVE_SETS, waveSetById, totalEnemiesInSet, setThreat, comboMultiplier,
   createRun, startRun, stepRun, simulateRun, stationaryPolicy, greedyPolicy,
@@ -21,7 +21,7 @@ function check(name, cond) {
 }
 function approx(a, b, eps = 1e-9) { return Math.abs(a - b) <= eps; }
 
-check('physics version is 0.5.0', VERSION === '0.5.0');
+check('physics version is 1.0.0', VERSION === '1.0.0');
 check('12 wave sets defined', WAVE_SETS.length === 12);
 check('wave set ids are 1..12 in order', WAVE_SETS.every((s, i) => s.id === i + 1));
 check('every wave set has a name and a hint', WAVE_SETS.every((s) => s.name && s.hint));

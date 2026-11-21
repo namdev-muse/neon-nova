@@ -1,4 +1,4 @@
-// Neon Nova v0.5.0 — headless browser render check.
+// Neon Nova v1.0.0 — headless browser render check.
 // Serves the game dir over local HTTP, loads it in a headless browser, and
 // asserts the M1 core, by hook and by eye:
 //   - the menu renders over a LIVE 3D scene (the attract flight actually
@@ -171,8 +171,8 @@ try {
   }
 
   const version = await page.evaluate(() => window.__nova.version);
-  if (version !== '0.5.0') throw new Error(`expected version 0.5.0, got ${version}`);
-  console.log('render-check: game module initialised, version 0.5.0');
+  if (version !== '1.0.0') throw new Error(`expected version 1.0.0, got ${version}`);
+  console.log('render-check: game module initialised, version 1.0.0');
 
   // WebGL context exists and the canvas is on screen.
   const gl = await page.evaluate(() => {
@@ -188,7 +188,7 @@ try {
   // text anywhere the player can see.
   const menuText = await page.textContent('#menu');
   if (!menuText.includes('NEON NOVA')) throw new Error('menu title missing');
-  if (menuText.includes('v0.5.0') || menuText.includes('Three.js') || menuText.includes('0.160.0')) {
+  if (menuText.includes('v1.0.0') || menuText.includes('Three.js') || menuText.includes('0.160.0')) {
     throw new Error('menu shows version/engine text — it must live in the README only');
   }
   const playClass = await page.getAttribute('#btn-play', 'class');

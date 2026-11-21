@@ -1,4 +1,4 @@
-// Neon Nova v0.5.0 — real gameplay screenshot capture + size sweep.
+// Neon Nova v1.0.0 — real gameplay screenshot capture + size sweep.
 // Serves the game dir over local HTTP, loads it in headless Chromium, and
 // captures three PNGs into docs/screenshots/ for the README:
 //   menu.png      — the main menu over the live 3D attract scene
