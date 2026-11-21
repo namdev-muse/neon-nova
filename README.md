@@ -11,7 +11,7 @@ Enemies drop gold energy: spend it on ship upgrades, play all 12 sets in
 a row in Campaign, or see how deep you can go in endless Survival.
 
 **Live:** https://namdev-muse.github.io/neon-nova/
-**Version:** v0.4.0 (M4 progression & depth)
+**Version:** v0.5.0 (M5 polish & robustness)
 **Stack:** Three.js 0.160.0 (pinned via jsdelivr import map, no build step), vanilla HTML/CSS/JS, Web Audio synth SFX + generative music, GitHub Pages.
 
 ## Gameplay

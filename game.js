@@ -1,4 +1,4 @@
-// Neon Nova v0.3.0 — 3D neon arena shooter (Three.js 0.160.0).
+// Neon Nova v0.5.0 — 3D neon arena shooter (Three.js 0.160.0).
 // Move with WASD/arrows, aim with the mouse, fire with click/Space,
 // dash with Shift. Chasers, shooters and splitters attack in dense
 // hand-crafted wave sets; kills chain a combo, hits cost shields.
@@ -10,6 +10,7 @@ import {
   DT, SET_CLEAR_SCORE, FEEDBACK, FEEDBACK_LAYERS,
   UPGRADES, UPGRADE_ORDER, upgradeLevel, upgradeStats, applyUpgrade, makeSurvivalSet,
   isSetUnlocked, isSurvivalUnlocked, defaultCampaign,
+  PERF_LEVELS, PERF_FPS_THRESHOLD, PERF_LOW_MS, perfGuardStep,
   defaultSave, serializeSave, parseSave, recordBest, clamp,
 } from './physics.js';
 
@@ -24,6 +25,36 @@ function persistSave() {
 function reduceFlashingOn() {
   if (save.reduceFlashing !== null) return save.reduceFlashing;
   return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+// ---------- accessibility (M5) ----------
+// Text size scales the root font size, so every rem-based clamp in
+// the UI grows with it; high contrast swaps the panel/HUD palette
+// (the CSS lives in style.css). Both persist in the save and apply
+// on every boot, before the menu first paints.
+function applyAccessibility() {
+  document.documentElement.style.fontSize = `${Math.round(save.textSize * 100)}%`;
+  document.body.classList.toggle('high-contrast', !!save.highContrast);
+}
+
+// ---------- FPS guard (M5) ----------
+// While a run is going, a sustained frame rate under the threshold
+// steps the renderer's pixel-ratio cap down one ladder rung at a
+// time (one-way — no thrash). Returning to the menu restores full
+// resolution. The decision lives in physics.js (perfGuardStep) and
+// is unit-tested; this is the timing + application glue.
+let perfLevel = 0; // index into PERF_LEVELS
+let lowFpsSince = null; // performance.now() when fps first sagged
+function fullPixelRatio() { return Math.min(window.devicePixelRatio || 1, PERF_LEVELS[0]); }
+function applyPerfLevel(level, { silent = false } = {}) {
+  perfLevel = clamp(Math.floor(level) || 0, 0, PERF_LEVELS.length - 1);
+  if (renderer) renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, PERF_LEVELS[perfLevel]));
+  if (!silent && perfLevel > 0) toast('Performance mode — lowered detail to keep the action smooth');
+}
+function resetPerf() {
+  perfLevel = 0;
+  lowFpsSince = null;
+  if (renderer) renderer.setPixelRatio(fullPixelRatio());
 }
 
 // ---------- audio (Web Audio synth SFX + generative music) ----------
@@ -592,6 +623,14 @@ function toast(text, ms = 2500) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => el.classList.remove('show'), ms);
 }
+// A toast is a run-time element. When any overlay screen opens, the
+// toast must go with it — otherwise the (translucent) overlay lets a
+// stale "set cleared" toast show through at the top of the screen,
+// overlapping the HUD combo line on the upgrade screen (M4 cosmetic).
+function hideToast() {
+  clearTimeout(toastTimer);
+  $('hud-toast').classList.remove('show');
+}
 function flashHit() {
   if (reduceFlashingOn()) return;
   const el = $('hit-flash');
@@ -770,6 +809,7 @@ function showScreen(id) {
 function pushScreen(id) {
   const top = screenStack[screenStack.length - 1];
   if (top === id) return;
+  hideToast();
   if (top) $(top).classList.add('hidden');
   screenStack.push(id);
   showScreen(id);
@@ -782,6 +822,7 @@ function popScreen() {
   return id;
 }
 function clearScreens() {
+  hideToast();
   while (screenStack.length) popScreen();
   for (const s of ['menu', 'howto', 'settings', 'complete', 'runover', 'pause', 'upgrade']) $(s).classList.add('hidden');
 }
@@ -862,6 +903,9 @@ function applySettingsToUI() {
   $('music-toggle').checked = save.music;
   $('sfx-toggle').checked = save.sfx;
   $('reduce-flashing').checked = reduceFlashingOn();
+  $('text-size-select').value = String(save.textSize);
+  $('high-contrast-toggle').checked = !!save.highContrast;
+  applyAccessibility();
   shakeStrength = save.shake;
   updateMuteLabels();
 }
@@ -925,6 +969,17 @@ bindShake('shake-range-pause', 'shake-value-pause');
 $('music-toggle').addEventListener('change', (e) => { save.music = e.target.checked; persistSave(); if (!save.music) stopMusic(); else if (phase === 'run') startMusic(); });
 $('sfx-toggle').addEventListener('change', (e) => { save.sfx = e.target.checked; persistSave(); });
 $('reduce-flashing').addEventListener('change', (e) => { save.reduceFlashing = e.target.checked; persistSave(); });
+$('text-size-select').addEventListener('change', (e) => {
+  const v = parseFloat(e.target.value);
+  save.textSize = [1, 1.2, 1.4].includes(v) ? v : 1;
+  persistSave();
+  applyAccessibility();
+});
+$('high-contrast-toggle').addEventListener('change', (e) => {
+  save.highContrast = e.target.checked;
+  persistSave();
+  applyAccessibility();
+});
 
 // ---------- flow ----------
 function applySetTheme(s) {
@@ -1039,6 +1094,7 @@ function quitToMenu() {
   bankBest();
   phase = 'menu';
   stopMusic();
+  resetPerf(); // full resolution again — the menu is light
   $('hud').classList.add('hidden');
   demoRun = physicsStartRun(WAVE_SETS[0]);
   renderRun = demoRun;
@@ -1554,6 +1610,22 @@ function frame(now) {
   elapsed += rawDt;
   fpsEma = fpsEma * 0.95 + (1 / Math.max(1e-6, rawDt)) * 0.05;
 
+  // FPS guard (M5): a run that stays under the threshold steps the
+  // resolution down one rung per low window, then re-arms — a slow
+  // device settles at a playable resolution instead of chugging.
+  if (phase === 'run' && renderer) {
+    if (fpsEma < PERF_FPS_THRESHOLD) {
+      if (lowFpsSince === null) lowFpsSince = now;
+      else if (now - lowFpsSince >= PERF_LOW_MS) {
+        const next = perfGuardStep(perfLevel, fpsEma, now - lowFpsSince);
+        if (next !== perfLevel) applyPerfLevel(next);
+        lowFpsSince = now; // re-arm: one step per low window
+      }
+    } else {
+      lowFpsSince = null;
+    }
+  }
+
   // Hit-stop (real-time) and slow-mo own the time scale; only the
   // newest hit-stop owns the restore.
   const nowS = now / 1000;
@@ -1640,7 +1712,7 @@ window.__nova = {
       score: run ? run.score : null,
       done: run ? run.done : null,
       reason: run ? run.reason : null,
-      perf: { fps: Math.round(fpsEma) },
+      perf: { fps: Math.round(fpsEma), pixelRatio: renderer ? renderer.getPixelRatio() : null, level: perfLevel },
     };
   },
   waveSets() {
@@ -1695,13 +1767,13 @@ window.__nova = {
       done: r.done, reason: r.reason,
       trauma, timeScale, fov: fovCurrent, fovPulse, crossPulse,
       shakeAmp: trauma * trauma * shakeStrength,
+      perf: { fps: Math.round(fpsEma), pixelRatio: renderer ? renderer.getPixelRatio() : null, level: perfLevel },
       // Feedback log: the last handled events with the layers that
       // fired, so tests can assert every bundle fired completely.
       feedback: feedbackLog.map((f) => ({ type: f.type, layers: [...f.layers] })),
       audio: audioCtx
         ? { state: audioCtx.state, music: !!musicTimer, musicStep, lead: musicLeadOn, sfxOn: save.sfx, musicOn: save.music }
         : null,
-      perf: { fps: Math.round(fpsEma) },
     };
   },
   start(setId) { startRun(setId ?? selectedSetId); },
@@ -1727,6 +1799,19 @@ window.__nova = {
   autopilot(on) { autoPilot = !!on; },
   setShake(v) { save.shake = clamp(v, 0, 1); shakeStrength = save.shake; persistSave(); applySettingsToUI(); },
   setReduceFlashing(b) { save.reduceFlashing = !!b; persistSave(); applySettingsToUI(); },
+  setTextSize(v) {
+    save.textSize = [1, 1.2, 1.4].includes(v) ? v : 1;
+    persistSave(); applySettingsToUI();
+  },
+  setHighContrast(b) { save.highContrast = !!b; persistSave(); applySettingsToUI(); },
+  // Test hook for the FPS guard's live wiring: applies a perf level
+  // through the same path the guard uses and returns the renderer's
+  // actual pixel ratio. (The guard's *decision* is unit-tested in
+  // smoke.js via perfGuardStep; this proves level → renderer.)
+  debugPerfSetLevel(level) {
+    applyPerfLevel(level, { silent: true });
+    return renderer ? renderer.getPixelRatio() : null;
+  },
   get shake() { return shakeStrength; },
   get reduceFlashing() { return reduceFlashingOn(); },
   save() { return JSON.parse(JSON.stringify(save)); },

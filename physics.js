@@ -1,4 +1,4 @@
-// Neon Nova v0.4.0 — pure simulation core (no DOM, no Three.js).
+// Neon Nova v0.5.0 — pure simulation core (no DOM, no Three.js).
 // The ship flies freely in a bounded neon arena (angled top-down view);
 // the player moves with WASD/arrows (momentum), aims with the mouse,
 // fires to destroy waves of enemies, and dashes (Shift) through danger
@@ -9,16 +9,18 @@
 // Twin Shot, Heavy Rounds, Reinforced Hull, Dash Recharge, Magnet
 // Core), a Campaign mode (sets 1-12 in sequence, upgrades carry),
 // and a Survival mode (endless escalating waves, upgrade draft every
-// 3 waves). Deterministic: every wave set is built from a fixed seed,
-// and the fixed-step simulation gives identical results for identical
-// inputs.
+// 3 waves). M5 adds polish & robustness: accessibility settings
+// (text size, high contrast) in the save, and an FPS guard that steps
+// the render resolution down when the frame rate sags. Deterministic:
+// every wave set is built from a fixed seed, and the fixed-step
+// simulation gives identical results for identical inputs.
 //
 // Anti-slop: no auto-aim, no auto-fire, no assist of any kind. The
 // bot plays through the same stepRun + public input hooks, and must
 // move AND aim with real decisions; sitting still and holding fire
 // fails every wave set (see simulateRun + the bot harness).
 
-export const VERSION = '0.4.0';
+export const VERSION = '0.5.0';
 export const ARENA_HALF_X = 34;
 export const ARENA_HALF_Z = 20;
 export const SHIP_RADIUS = 0.9;
@@ -951,6 +953,22 @@ export function simulateRun(set, policy, opts = {}) {
   };
 }
 
+// --- FPS guard (M5) ---
+// Render-resolution ladder the game steps down when the frame rate
+// sags: each level is the renderer's pixel-ratio cap. The guard is
+// one-way during a run (no thrash between levels) and resets to full
+// resolution when the player returns to the menu. The decision is a
+// pure function so the smoke tests can assert it; game.js owns the
+// timing (how long fps has stayed low) and applies the level.
+export const PERF_LEVELS = [2, 1.5, 1.25, 1];
+export const PERF_FPS_THRESHOLD = 45; // step down below this fps
+export const PERF_LOW_MS = 3000; // …sustained this long
+export function perfGuardStep(level, fps, lowMs) {
+  const l = clamp(Math.floor(level) || 0, 0, PERF_LEVELS.length - 1);
+  if (fps < PERF_FPS_THRESHOLD && lowMs >= PERF_LOW_MS && l < PERF_LEVELS.length - 1) return l + 1;
+  return l;
+}
+
 // --- save (localStorage) ---
 export function defaultSave() {
   return {
@@ -962,6 +980,10 @@ export function defaultSave() {
     campaign: { nextSet: 1, score: 0, energy: 0, upgrades: {}, best: 0 },
     totalRuns: 0, muted: false, shake: 1,
     reduceFlashing: null, music: true, sfx: true, volume: 0.6,
+    // M5 accessibility: textSize is a root font-size multiplier
+    // (1 = Normal, 1.2 = Large, 1.4 = Extra large); highContrast
+    // switches the panels/HUD to the high-contrast palette.
+    textSize: 1, highContrast: false,
   };
 }
 export function defaultCampaign() {
@@ -1006,6 +1028,8 @@ export function parseSave(text) {
     if (typeof s.music === 'boolean') d.music = s.music;
     if (typeof s.sfx === 'boolean') d.sfx = s.sfx;
     if (typeof s.volume === 'number' && Number.isFinite(s.volume)) d.volume = clamp(s.volume, 0, 1);
+    if ([1, 1.2, 1.4].includes(s.textSize)) d.textSize = s.textSize;
+    if (typeof s.highContrast === 'boolean') d.highContrast = s.highContrast;
     return d;
   } catch { return d; }
 }

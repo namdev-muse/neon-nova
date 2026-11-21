@@ -176,7 +176,9 @@ h2 {
   background: rgba(34, 211, 238, 0.14);
   box-shadow: 0 0 18px rgba(34, 211, 238, 0.35);
 }
-.set-card .set-name { font-weight: 800; font-size: 1em; }
+.set-card .set-name { font-weight: 800; font-size: 0.92em; line-height: 1.25; }
+/* "9. Rolling Thunder" wrapped to two lines at 2560x1080 (M4) — the
+   slightly smaller name fits the card on one line at every sweep size. */
 .set-card .set-meta { color: var(--muted); font-size: 0.82em; margin-top: 2px; }
 .set-card .set-best { color: var(--gold); font-size: 0.82em; margin-top: 2px; }
 .set-hint { color: var(--muted); font-size: 0.92em; margin: 4px 0 0; min-height: 1.4em; }
@@ -403,6 +405,20 @@ h2 {
 /* --- high contrast --- */
 body.high-contrast {
   --panel: rgba(4, 6, 20, 0.96);
+  --panel-border: rgba(103, 232, 249, 0.7);
   --text: #ffffff;
   --muted: #cbd5e1;
+}
+body.high-contrast .btn { border-color: rgba(103, 232, 249, 0.8); }
+body.high-contrast .set-card { border-color: rgba(103, 232, 249, 0.6); }
+body.high-contrast #hud { text-shadow: 0 2px 6px rgba(0, 0, 0, 1); }
+
+/* --- text size select --- */
+.slider-row select {
+  font: inherit; font-weight: 600;
+  color: var(--text);
+  background: rgba(7, 8, 24, 0.8);
+  border: 1px solid rgba(103, 232, 249, 0.45);
+  border-radius: 8px;
+  padding: 6px 8px;
 }
