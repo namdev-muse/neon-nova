@@ -1,4 +1,4 @@
-// Neon Nova v0.5.0 — 3D neon arena shooter (Three.js 0.160.0).
+// Neon Nova v1.0.0 — 3D neon arena shooter (Three.js 0.160.0).
 // Move with WASD/arrows, aim with the mouse, fire with click/Space,
 // dash with Shift. Chasers, shooters and splitters attack in dense
 // hand-crafted wave sets; kills chain a combo, hits cost shields.

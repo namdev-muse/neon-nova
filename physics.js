@@ -1,4 +1,4 @@
-// Neon Nova v0.5.0 — pure simulation core (no DOM, no Three.js).
+// Neon Nova v1.0.0 — pure simulation core (no DOM, no Three.js).
 // The ship flies freely in a bounded neon arena (angled top-down view);
 // the player moves with WASD/arrows (momentum), aims with the mouse,
 // fires to destroy waves of enemies, and dashes (Shift) through danger
@@ -20,7 +20,7 @@
 // move AND aim with real decisions; sitting still and holding fire
 // fails every wave set (see simulateRun + the bot harness).
 
-export const VERSION = '0.5.0';
+export const VERSION = '1.0.0';
 export const ARENA_HALF_X = 34;
 export const ARENA_HALF_Z = 20;
 export const SHIP_RADIUS = 0.9;

@@ -11,7 +11,7 @@ Enemies drop gold energy: spend it on ship upgrades, play all 12 sets in
 a row in Campaign, or see how deep you can go in endless Survival.
 
 **Live:** https://namdev-muse.github.io/neon-nova/
-**Version:** v0.5.0 (M5 polish & robustness)
+**Version:** v1.0.0 (release — M6)
 **Stack:** Three.js 0.160.0 (pinned via jsdelivr import map, no build step), vanilla HTML/CSS/JS, Web Audio synth SFX + generative music, GitHub Pages.
 
 ## Gameplay
@@ -107,7 +107,7 @@ npm run screenshots   # README captures + 3-resolution size sweep (inspect by ey
 
 ## Tests
 
-- **Smoke (289 checks):** wave sets, movement momentum, aim, fire rate,
+- **Smoke (304 checks):** wave sets, movement momentum, aim, fire rate,
   dash, kills/combo/score, splitters, shooter bolts, shield loss,
   wave flow, determinism, the anti-slop gate, feedback tiers + layers,
   upgrades (table, derived stats, purchases), survival wave generation
@@ -130,3 +130,18 @@ npm run screenshots   # README captures + 3-resolution size sweep (inspect by ey
   buying a card spending energy and applying the upgrade, continuing
   into set 2 with the loadout, the gates opening afterwards, and a
   Survival run clearing wave 1 without ending — zero console errors.
+  The render check also runs under Firefox (headed, software GL) and
+  covers the M5 additions: accessibility settings apply and persist,
+  the FPS guard steps the pixel ratio down and restores it on menu,
+  and touch controls move, aim and dash through the real handlers.
+
+## Known issues (v1.0.0)
+
+- Survival wave 1 is clearable by a perfect-aim stationary turret —
+  the run-level gate holds (a stationary ship dies in wave 2, ~7.6s
+  in), but the opening wave is the gentlest in the mode by design.
+- Set 1 is still easy for a good player — the ramp lives in sets 2–12.
+- Campaign progress is kept in the local save only — no cloud sync.
+- The FPS guard is one-way during a run: it never steps back up
+  mid-run, only on returning to the menu. Deliberate — stepping up
+  again would thrash on a marginal device.
