@@ -305,6 +305,55 @@ h2 {
   50% { opacity: 1; }
 }
 
+/* --- upgrade draft --- */
+.panel-upgrade { width: min(94vw, 760px); }
+.upgrade-energy { color: var(--gold); font-weight: 800; font-size: 1.15em; margin: 4px 0; }
+.upgrade-owned { color: var(--muted); font-size: 0.92em; margin: 4px 0 14px; min-height: 1.2em; }
+.upgrade-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.upgrade-card {
+  background: rgba(7, 8, 24, 0.6);
+  border: 1px solid rgba(251, 191, 36, 0.45);
+  border-radius: 10px;
+  padding: 14px 12px;
+  cursor: pointer;
+  text-align: left;
+  display: flex; flex-direction: column; gap: 6px;
+  color: var(--text);
+  font: inherit;
+  transition: transform 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
+}
+.upgrade-card:hover, .upgrade-card:focus-visible {
+  transform: scale(1.04);
+  border-color: var(--gold);
+  box-shadow: 0 0 16px rgba(251, 191, 36, 0.35);
+  outline: none;
+}
+.upgrade-card:active { transform: scale(0.97); }
+.upgrade-card.unaffordable { opacity: 0.55; }
+.upgrade-card.unaffordable:hover { transform: none; box-shadow: none; }
+.upgrade-card.maxed { opacity: 0.45; cursor: default; }
+.upgrade-card.maxed:hover { transform: none; box-shadow: none; }
+.upgrade-name { font-weight: 800; font-size: 1.05em; color: var(--gold); }
+.upgrade-level { color: var(--cyan-bright); font-size: 0.85em; font-weight: 700; }
+.upgrade-desc { color: var(--text); font-size: 0.92em; line-height: 1.4; }
+.upgrade-cost { color: var(--gold); font-size: 0.88em; font-weight: 700; }
+.upgrade-key { color: var(--muted); font-size: 0.78em; }
+.upgrade-empty { color: var(--muted); grid-column: 1 / -1; }
+#upgrade .btn.primary { display: block; width: 100%; }
+
+/* --- locked wave-set cards --- */
+.set-card.locked { opacity: 0.55; cursor: default; }
+.set-card.locked:hover, .set-card.locked:focus-visible { transform: none; box-shadow: none; }
+.set-card .set-locked { color: var(--muted); }
+
+/* --- HUD upgrades line --- */
+#hud-upgrades { color: var(--violet); font-size: 0.85em; min-height: 1.1em; }
+
 /* --- complete / run over --- */
 .big-score { font-size: clamp(1.6rem, 5vmin, 2.4rem); font-weight: 800; color: var(--gold); margin: 6px 0; text-shadow: 0 0 18px rgba(251, 191, 36, 0.5); }
 .complete-best, .complete-unlock { color: var(--muted); margin: 4px 0; }
@@ -343,6 +392,7 @@ h2 {
 @media (max-width: 720px) {
   .panel-menu { grid-template-columns: 1fr; }
   .set-select { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); }
+  .upgrade-cards { grid-template-columns: 1fr; }
   #hud { flex-wrap: wrap; }
   .hud-mid { order: 3; width: 100%; }
 }

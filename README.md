@@ -7,9 +7,11 @@ distance and fire bolts, splitters burst into minis when they die. You
 have 3 shields: a hit costs one and stuns the ship; lose all three and
 the run ends. Clear every wave to finish the set. Score comes from kills
 × combo multiplier + wave bonuses — your best score is saved per wave set.
+Enemies drop gold energy: spend it on ship upgrades, play all 12 sets in
+a row in Campaign, or see how deep you can go in endless Survival.
 
 **Live:** https://namdev-muse.github.io/neon-nova/
-**Version:** v0.3.0 (M3 feel & juice)
+**Version:** v0.4.0 (M4 progression & depth)
 **Stack:** Three.js 0.160.0 (pinned via jsdelivr import map, no build step), vanilla HTML/CSS/JS, Web Audio synth SFX + generative music, GitHub Pages.
 
 ## Gameplay
@@ -49,7 +51,25 @@ vignette breathes at the edges and a soft heartbeat thumps. Shake
 strength (0–100%), flashing, volume, music and SFX are all adjustable
 in Settings, and every effect settles back to its exact rest state.
 
-## Wave sets
+## Progression & depth
+
+- **Campaign:** all 12 wave sets in a row, one run. Score, energy and
+  upgrades carry across sets; shields refill between sets; death ends
+  the campaign (your best campaign total is kept). Quitting to the menu
+  keeps the campaign — resume it any time.
+- **Ship upgrades:** gold energy is currency. Between campaign sets, and
+  every 3 waves survived, choose from three upgrade cards — Rapid Fire,
+  Twin Shot, Heavy Rounds, Reinforced Hull, Dash Recharge, Magnet Core —
+  each with levels that genuinely change how the ship flies and shoots.
+  Everything costs 163 energy in total, and one campaign earns roughly
+  150–200, so a build is a choice, not a checklist.
+- **Survival:** endless escalating waves — shooters join from wave 2,
+  splitters from wave 3, and the pressure never stops. The wave bonus
+  grows as you go deeper. A stationary ship dies in wave 2; a stock ship
+  lasts about 9 waves, a well-upgraded one past 17.
+- **Unlocks:** clearing a set unlocks the next one; clearing Set 1
+  unlocks Survival. The combo window is 2.5s — kills must come close
+  together to hold the multiplier at x4.
 
 Twelve hand-crafted wave sets, each with its own identity (palette, enemy
 mix, spawn rhythm):
@@ -87,18 +107,26 @@ npm run screenshots   # README captures + 3-resolution size sweep (inspect by ey
 
 ## Tests
 
-- **Smoke (207 checks):** wave sets, movement momentum, aim, fire rate,
+- **Smoke (289 checks):** wave sets, movement momentum, aim, fire rate,
   dash, kills/combo/score, splitters, shooter bolts, shield loss,
   wave flow, determinism, the anti-slop gate, feedback tiers + layers,
-  save round-trip.
+  upgrades (table, derived stats, purchases), survival wave generation
+  and escalation, unlock gates, save round-trip (incl. campaign +
+  survival bests).
 - **Bot:** the greedy combat bot (kites, leads its aim, dodges bolts,
   dashes out of crushes) completes all 12 wave sets; sitting still and
-  holding fire fails all 12.
+  holding fire fails all 12. A mid-campaign loadout clears set 12 with
+  shields to spare, survives 17 survival waves (vs 9 stock), and a
+  stationary ship dies in survival wave 2.
 - **Render check:** headless Chromium — menu over a live 3D attract
   scene, Play starts a run, movement and aim asserted in *screen* space,
   firing, dash, kill, wave-1 clear, shield loss with the flashing
   toggle, pause/resume/restart, run-over, best score saved — plus the
   M3 feel assertions: every feedback bundle fires completely (read back
   from the in-game feedback log), speed FOV kick and settle, rest-state
-  cleanliness, shake-0 suppression, low-shield vignette — zero
-  console errors.
+  cleanliness, shake-0 suppression, low-shield vignette — plus the M4
+  progression assertions: fresh-save gates (sets 2–12 and Survival
+  locked), a full campaign clear of set 1 opening the upgrade screen,
+  buying a card spending energy and applying the upgrade, continuing
+  into set 2 with the loadout, the gates opening afterwards, and a
+  Survival run clearing wave 1 without ending — zero console errors.

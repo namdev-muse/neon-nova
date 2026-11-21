@@ -7,7 +7,9 @@ import * as THREE from 'three';
 import {
   VERSION, WAVE_SETS, waveSetById, comboMultiplier, startRun as physicsStartRun, stepRun,
   greedyPolicy, nearestEnemy, ARENA_HALF_X, ARENA_HALF_Z, SHIP_RADIUS, MAX_SPEED,
-  SHIELDS, DT, DASH_COOLDOWN, SET_CLEAR_SCORE, FEEDBACK, FEEDBACK_LAYERS,
+  DT, SET_CLEAR_SCORE, FEEDBACK, FEEDBACK_LAYERS,
+  UPGRADES, UPGRADE_ORDER, upgradeLevel, upgradeStats, applyUpgrade, makeSurvivalSet,
+  isSetUnlocked, isSurvivalUnlocked, defaultCampaign,
   defaultSave, serializeSave, parseSave, recordBest, clamp,
 } from './physics.js';
 
@@ -92,6 +94,7 @@ function sfx(name) {
     case 'setComplete': [523, 659, 784, 1047, 1319].forEach((f, i) => tone({ freq: f, dur: 0.2, type: 'triangle', vol: 0.18, when: i * 0.09 })); break;
     case 'runOver': [392, 330, 262, 196].forEach((f, i) => tone({ freq: f, dur: 0.3, type: 'sawtooth', vol: 0.14, when: i * 0.14 })); break;
     case 'launch': tone({ freq: 220, freqEnd: 660, dur: 0.3, type: 'sawtooth', vol: 0.12 }); break;
+    case 'upgrade': tone({ freq: 660, dur: 0.1, type: 'triangle', vol: 0.16 }); tone({ freq: 880, dur: 0.12, type: 'triangle', vol: 0.16, when: 0.08 }); tone({ freq: 1320, dur: 0.18, type: 'triangle', vol: 0.16, when: 0.16 }); break;
     default: break;
   }
 }
@@ -502,10 +505,12 @@ function updateRings(dt) {
 }
 
 // ---------- game state ----------
-let phase = 'menu'; // 'menu' | 'run' | 'paused' | 'complete' | 'runover'
+let phase = 'menu'; // 'menu' | 'run' | 'paused' | 'complete' | 'runover' | 'upgrade'
 let selectedSetId = 1;
 let set = WAVE_SETS[0];
 let run = null;
+let mode = 'set'; // 'set' | 'campaign' | 'survival' — the mode of the current run
+let upgradeCtx = null; // { kind: 'campaign' | 'survival' } while the upgrade screen is open
 let demoRun = physicsStartRun(WAVE_SETS[0]);
 let renderRun = demoRun; // what the scene renders: demo in menu, run in play
 let trauma = 0;
@@ -700,7 +705,7 @@ function handleEvents(events) {
         sfx('waveStart');
         fovPulse = Math.max(fovPulse, 0.5);
         spawnRing(run.x, run.z, 0x67e8f9, 6, 0.5);
-        toast(`Wave ${e.wave} of ${set.waves.length}`);
+        toast(run.mode === 'survival' ? `Wave ${e.wave}` : `Wave ${e.wave} of ${set.waves.length}`);
         logFeedback('waveStart', ['sound', 'fovPulse', 'ringPulse', 'toast']);
         break;
       case 'hit':
@@ -753,7 +758,7 @@ function handleEvents(events) {
 // ---------- screens (stack) ----------
 const screenStack = [];
 function showScreen(id) {
-  for (const s of ['menu', 'howto', 'settings', 'complete', 'runover', 'pause']) {
+  for (const s of ['menu', 'howto', 'settings', 'complete', 'runover', 'pause', 'upgrade']) {
     if (s !== id) $(s).classList.add('hidden');
   }
   $(id).classList.remove('hidden');
@@ -778,7 +783,7 @@ function popScreen() {
 }
 function clearScreens() {
   while (screenStack.length) popScreen();
-  for (const s of ['menu', 'howto', 'settings', 'complete', 'runover', 'pause']) $(s).classList.add('hidden');
+  for (const s of ['menu', 'howto', 'settings', 'complete', 'runover', 'pause', 'upgrade']) $(s).classList.add('hidden');
 }
 
 // ---------- UI wiring ----------
@@ -787,15 +792,23 @@ function refreshSetSelect() {
   el.innerHTML = '';
   for (const s of WAVE_SETS) {
     const best = save.best[s.id];
+    const unlocked = isSetUnlocked(save.best, s.id);
     const card = document.createElement('button');
     card.type = 'button';
-    card.className = 'set-card' + (s.id === selectedSetId ? ' selected' : '');
+    card.className = 'set-card' + (s.id === selectedSetId ? ' selected' : '') + (unlocked ? '' : ' locked');
     card.style.setProperty('--card-accent', s.theme.ring);
     card.innerHTML = `<span class="set-name">${s.id}. ${s.name}</span>`
       + `<div class="set-meta">${s.waves.length} waves &middot; ${s.waves.reduce((n, w) => n + w.groups.reduce((m, g) => m + g.count, 0), 0)} enemies</div>`
-      + (best ? `<div class="set-best">Best ${best.score.toLocaleString()} &middot; ${best.waves}/${s.waves.length} waves</div>` : '<div class="set-best">Not cleared yet</div>');
+      + (!unlocked
+        ? `<div class="set-best set-locked">Clear Set ${s.id - 1} to unlock</div>`
+        : best ? `<div class="set-best">Best ${best.score.toLocaleString()} &middot; ${best.waves}/${s.waves.length} waves</div>` : '<div class="set-best">Not cleared yet</div>');
     card.addEventListener('click', () => {
       ensureAudio(); sfx('tick');
+      if (!unlocked) {
+        toast(`Clear Set ${s.id - 1} to unlock ${s.name}`);
+        $('set-hint').textContent = `Locked — clear ${WAVE_SETS[s.id - 2].name} first.`;
+        return;
+      }
       selectedSetId = s.id;
       refreshSetSelect();
       $('set-hint').textContent = s.hint;
@@ -808,6 +821,32 @@ function refreshSetSelect() {
   $('menu-best').textContent = bests.length
     ? `Best score: ${Math.max(...bests.map((b) => b.score)).toLocaleString()}`
     : 'No runs yet — the arena is waiting.';
+  refreshModeButtons();
+}
+// Campaign + Survival buttons: labels carry the progress, and the
+// Survival button stays locked (with its requirement stated) until
+// set 1 is cleared — the best-score gates from M4.
+function refreshModeButtons() {
+  const camp = save.campaign;
+  const campBtn = $('btn-campaign');
+  if (camp.nextSet > WAVE_SETS.length) {
+    campBtn.textContent = 'Campaign — Complete';
+  } else if (camp.nextSet > 1 || camp.score > 0) {
+    campBtn.textContent = `Campaign — Set ${camp.nextSet} of 12`;
+  } else {
+    campBtn.textContent = 'Campaign';
+  }
+  const survBtn = $('btn-survival');
+  const survUnlocked = isSurvivalUnlocked(save.best);
+  survBtn.disabled = !survUnlocked;
+  survBtn.textContent = survUnlocked ? 'Survival' : 'Survival — clear Set 1 to unlock';
+  const survBest = save.best.survival;
+  $('menu-campaign').textContent = camp.best > 0
+    ? `Campaign best: ${camp.best.toLocaleString()}`
+      + (survBest ? ` &middot; Survival best: ${survBest.score.toLocaleString()} (${survBest.waves} waves)` : '')
+    : survBest
+      ? `Survival best: ${survBest.score.toLocaleString()} (${survBest.waves} waves)`
+      : '';
 }
 function updateMuteLabels() {
   const label = save.muted ? 'Sound: Off' : 'Sound: On';
@@ -837,6 +876,12 @@ for (const b of document.querySelectorAll('.btn, .icon-btn, .set-card')) {
   b.addEventListener('mouseenter', () => { if (audioCtx) sfx('tick'); });
 }
 $('btn-play').addEventListener('click', () => { ensureAudio(); sfx('launch'); startRun(selectedSetId); });
+$('btn-campaign').addEventListener('click', () => { ensureAudio(); sfx('launch'); startCampaign(); });
+$('btn-survival').addEventListener('click', () => {
+  ensureAudio();
+  if (!isSurvivalUnlocked(save.best)) { sfx('tick'); toast('Survival unlocks when you clear Set 1 — First Contact'); return; }
+  sfx('launch'); startSurvival();
+});
 $('btn-howto').addEventListener('click', () => { ensureAudio(); sfx('tick'); pushScreen('howto'); });
 $('btn-howto-close').addEventListener('click', () => { sfx('tick'); popScreen(); });
 $('btn-settings').addEventListener('click', () => { ensureAudio(); sfx('tick'); applySettingsToUI(); pushScreen('settings'); });
@@ -846,10 +891,11 @@ $('btn-mute-hud').addEventListener('click', () => { ensureAudio(); setMuted(!sav
 $('btn-mute-pause').addEventListener('click', () => { ensureAudio(); setMuted(!save.muted); });
 $('btn-pause').addEventListener('click', () => { if (phase === 'run') pauseGame(); });
 $('btn-resume').addEventListener('click', () => resumeGame());
-$('btn-restart').addEventListener('click', () => { sfx('launch'); startRun(selectedSetId); });
+$('btn-restart').addEventListener('click', () => { sfx('launch'); restartCurrentRun(); });
 $('btn-quit').addEventListener('click', () => quitToMenu());
-$('btn-retry').addEventListener('click', () => { sfx('launch'); startRun(selectedSetId); });
-$('btn-replay').addEventListener('click', () => { sfx('launch'); startRun(selectedSetId); });
+$('btn-retry').addEventListener('click', () => { sfx('launch'); restartCurrentRun(); });
+$('btn-replay').addEventListener('click', () => { sfx('launch'); restartCurrentRun(); });
+$('btn-upgrade-continue').addEventListener('click', () => { sfx('tick'); continueFromUpgrade(); });
 $('btn-next').addEventListener('click', () => {
   sfx('launch');
   startRun(Math.min(selectedSetId + 1, WAVE_SETS.length));
@@ -890,19 +936,32 @@ function applySetTheme(s) {
 // Bank the current run's best score. Called whenever a run ends
 // (complete / run over) AND whenever a run is abandoned (restart,
 // quit to menu) — a good run that is quit mid-flight still counts.
+// A campaign run's per-set best records only what THIS set earned
+// (run.score minus the score carried in), not the campaign total;
+// survival banks its own best (score + waves survived).
 function bankBest() {
   if (!run || run.score <= 0) return;
-  recordBest(save, set.id, run.score, run.wavesCleared);
+  if (run.mode === 'survival') {
+    recordBest(save, 'survival', run.score, run.wavesCleared);
+  } else if (set.id >= 1) {
+    recordBest(save, set.id, run.score - (run.scoreAtStart || 0), run.wavesCleared);
+  }
   persistSave();
 }
-function startRun(setId) {
+// Start a run of a wave set (by id) or a set-like object (a survival
+// set). opts: { mode: 'set' | 'campaign' | 'survival', upgrades,
+// energy, score } — campaign/survival runs carry their score, energy
+// and upgrades in; a plain set run always starts fresh.
+function startRun(setOrId, opts = {}) {
   bankBest();
-  set = waveSetById(setId) || WAVE_SETS[0];
-  selectedSetId = set.id;
-  run = physicsStartRun(set);
+  mode = opts.mode || 'set';
+  set = typeof setOrId === 'object' ? setOrId : (waveSetById(setOrId) || WAVE_SETS[0]);
+  if (set.id >= 1) selectedSetId = set.id;
+  run = physicsStartRun(set, opts);
   renderRun = run;
   applySetTheme(set);
   phase = 'run';
+  upgradeCtx = null;
   clearScreens();
   $('hud').classList.remove('hidden');
   trauma = 0; hitStopUntil = 0; slowMoUntil = 0; timeScale = 1; fovPulse = 0;
@@ -913,10 +972,56 @@ function startRun(setId) {
   ensureAudio();
   startMusic();
   handleEvents([{ type: 'launch' }]);
-  $('hud-set').textContent = `Wave Set ${set.id} — ${set.name}`;
-  toast(`Wave 1 of ${set.waves.length} — ${set.hint}`, 3500);
-  $('sr-status').textContent = `Wave set ${set.name} started. Wave 1 of ${set.waves.length}.`;
+  if (mode === 'survival') {
+    $('hud-set').textContent = 'Survival — endless waves';
+    toast('Survival — wave 1. How deep can you go?', 3500);
+    $('sr-status').textContent = 'Survival started. Wave 1.';
+  } else if (mode === 'campaign') {
+    $('hud-set').textContent = `Campaign — Set ${set.id} — ${set.name}`;
+    toast(`Campaign — Set ${set.id} of 12 — ${set.hint}`, 3500);
+    $('sr-status').textContent = `Campaign set ${set.id} ${set.name} started. Wave 1 of ${set.waves.length}.`;
+  } else {
+    $('hud-set').textContent = `Wave Set ${set.id} — ${set.name}`;
+    toast(`Wave 1 of ${set.waves.length} — ${set.hint}`, 3500);
+    $('sr-status').textContent = `Wave set ${set.name} started. Wave 1 of ${set.waves.length}.`;
+  }
   refreshSetSelect();
+}
+// Campaign: sets 1-12 in sequence, one run. Score, energy and
+// upgrades carry across sets; shields refill between sets. Quitting
+// to the menu keeps the campaign (resumable); death or finishing
+// set 12 resets it (the best campaign total is kept).
+function startCampaign() {
+  const camp = save.campaign;
+  if (camp.nextSet > WAVE_SETS.length) {
+    save.campaign = { ...defaultCampaign(), best: camp.best };
+    persistSave();
+  }
+  const c = save.campaign;
+  startRun(c.nextSet, { mode: 'campaign', upgrades: c.upgrades, energy: c.energy, score: c.score });
+}
+function startSurvival() {
+  startRun(makeSurvivalSet(Date.now() % 100000), { mode: 'survival' });
+}
+// Restart whatever mode is currently running, from its start: a
+// campaign set restarts with the campaign loadout and the score and
+// energy it entered the set with — but only while the campaign is
+// still live for that set. After a death or a completion the campaign
+// resets to set 1, so "Try Again" starts a fresh campaign instead of
+// silently skipping the earlier sets.
+function restartCurrentRun() {
+  if (mode === 'campaign') {
+    const c = save.campaign;
+    if (c.nextSet === set.id) {
+      startRun(set.id, { mode: 'campaign', upgrades: c.upgrades, energy: c.energy, score: c.score });
+    } else {
+      startCampaign();
+    }
+  } else if (mode === 'survival') {
+    startSurvival();
+  } else {
+    startRun(selectedSetId);
+  }
 }
 function pauseGame() {
   if (phase !== 'run') return;
@@ -946,8 +1051,50 @@ function quitToMenu() {
 function endRun() {
   if (!run) return;
   bankBest();
-  const best = save.best[set.id] || { score: run.score, waves: run.wavesCleared };
   refreshSetSelect();
+  // Campaign set cleared: bank the progress into the campaign, then
+  // the upgrade screen — not the set-complete screen. The last set
+  // ends the campaign instead.
+  if (run.reason === 'complete' && mode === 'campaign') {
+    const camp = save.campaign;
+    camp.score = run.score;
+    camp.energy = run.energy;
+    camp.nextSet = set.id + 1;
+    camp.best = Math.max(camp.best, run.score);
+    persistSave();
+    if (camp.nextSet <= WAVE_SETS.length) {
+      openUpgrade('campaign');
+      return;
+    }
+    // Set 12 cleared: the campaign is complete.
+    const total = run.score;
+    save.campaign = { ...defaultCampaign(), best: camp.best };
+    persistSave();
+    phase = 'complete';
+    $('complete-score').textContent = `Campaign Score ${total.toLocaleString()}`;
+    $('complete-detail').textContent = `All 12 sets cleared — ${run.kills} kills this set, max combo x${comboMultiplier(run.maxCombo).toFixed(1)}. The nova is yours.`;
+    $('complete-best').textContent = `Campaign best: ${camp.best.toLocaleString()}`;
+    $('complete-energy').textContent = `Energy banked: ${run.energy}`;
+    $('btn-next').classList.add('hidden');
+    pushScreen('complete');
+    $('sr-status').textContent = `Campaign complete. Score ${total}.`;
+    return;
+  }
+  // Campaign death: the campaign ends here. The best total is kept;
+  // the next campaign starts fresh at set 1.
+  if (run.reason === 'runOver' && mode === 'campaign') {
+    const campBest = Math.max(save.campaign.best, run.score);
+    const total = run.score;
+    save.campaign = { ...defaultCampaign(), best: campBest };
+    persistSave();
+    phase = 'runover';
+    $('runover-stats').innerHTML = `Campaign score <strong>${total.toLocaleString()}</strong> &middot; Set ${set.id}/12 &middot; Waves ${run.wavesCleared}/${set.waves.length} &middot; Kills ${run.kills} &middot; Max combo x${comboMultiplier(run.maxCombo).toFixed(1)}`;
+    $('runover-best').textContent = `Campaign best: ${campBest.toLocaleString()} — the campaign resets. Start again to go further.`;
+    pushScreen('runover');
+    $('sr-status').textContent = `Ship down in campaign set ${set.id}. Campaign score ${total}.`;
+    return;
+  }
+  const best = save.best[set.id] || save.best.survival || { score: run.score, waves: run.wavesCleared };
   if (run.reason === 'complete') {
     phase = 'complete';
     $('complete-score').textContent = `Score ${run.score.toLocaleString()}`;
@@ -963,12 +1110,158 @@ function endRun() {
     }
     pushScreen('complete');
     $('sr-status').textContent = `Wave set ${set.name} clear. Score ${run.score}.`;
+  } else if (mode === 'survival') {
+    phase = 'runover';
+    const survBest = save.best.survival || { score: run.score, waves: run.wavesCleared };
+    $('runover-stats').innerHTML = `Score <strong>${run.score.toLocaleString()}</strong> &middot; Waves survived <strong>${run.wavesCleared}</strong> &middot; Kills ${run.kills} &middot; Max combo x${comboMultiplier(run.maxCombo).toFixed(1)}`;
+    $('runover-best').textContent = `Survival best: ${survBest.score.toLocaleString()} (${survBest.waves} waves)`;
+    pushScreen('runover');
+    $('sr-status').textContent = `Ship down in survival after ${run.wavesCleared} waves. Score ${run.score}.`;
   } else {
     phase = 'runover';
     $('runover-stats').innerHTML = `Score <strong>${run.score.toLocaleString()}</strong> &middot; Waves ${run.wavesCleared}/${set.waves.length} &middot; Kills ${run.kills} &middot; Max combo x${comboMultiplier(run.maxCombo).toFixed(1)}`;
     $('runover-best').textContent = `Best for this set: ${best.score.toLocaleString()} (${best.waves}/${set.waves.length} waves)`;
     pushScreen('runover');
     $('sr-status').textContent = `Ship down. Score ${run.score}.`;
+  }
+}
+
+// ---------- upgrades (M4) ----------
+// The upgrade screen opens between campaign sets and every 3
+// survival waves. Energy is the currency; the player may buy as many
+// of the three offered upgrades as they can afford, then continues.
+// Offers are rolled once per screen — buying one never swaps the
+// other two out from under the player.
+function currentUpgrades() {
+  return mode === 'survival' && run ? run.upgrades : save.campaign.upgrades;
+}
+// Energy follows the screen, not the finished run: a campaign upgrade
+// spends the banked campaign energy, a survival upgrade the live run's.
+// Reading run.energy on the campaign screen went stale after the first
+// buy — the display and affordability kept showing the pre-purchase
+// balance, and a second buy could double-spend it.
+function currentEnergy() {
+  return upgradeCtx && upgradeCtx.kind === 'survival' ? run.energy : save.campaign.energy;
+}
+function rollUpgradeOffers() {
+  const owned = currentUpgrades();
+  const energy = currentEnergy();
+  const avail = UPGRADE_ORDER.filter((id) => upgradeLevel(owned, id) < UPGRADES[id].max);
+  for (let i = avail.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [avail[i], avail[j]] = [avail[j], avail[i]];
+  }
+  const offers = avail.slice(0, 3);
+  // The draft must always offer a real choice: if none of the rolled
+  // cards is affordable but one exists, swap the priciest offered card
+  // for a random affordable one. (M4 playtest: two drafts in a row
+  // rolled nothing affordable at 5-8 energy — a screen full of "not
+  // enough" is not a choice.) If nothing is affordable at all, the
+  // roll stands and the energy banks for the next draft.
+  const costOf = (id) => UPGRADES[id].cost[upgradeLevel(owned, id)];
+  const affordable = avail.filter((id) => costOf(id) <= energy);
+  if (affordable.length && !offers.some((id) => costOf(id) <= energy)) {
+    const swapOut = offers.reduce((a, b) => (costOf(a) > costOf(b) ? a : b));
+    const swapIn = affordable.filter((id) => !offers.includes(id));
+    offers[offers.indexOf(swapOut)] = swapIn[Math.floor(Math.random() * swapIn.length)];
+  }
+  return offers;
+}
+function openUpgrade(kind) {
+  // Set the context BEFORE rolling: rollUpgradeOffers reads it (via
+  // currentEnergy) to guarantee an affordable offer, and the roll runs
+  // while the object literal is still being evaluated otherwise.
+  upgradeCtx = { kind, offers: [] };
+  upgradeCtx.offers = rollUpgradeOffers();
+  phase = 'upgrade';
+  renderUpgradeCards();
+  pushScreen('upgrade');
+}
+function renderUpgradeCards() {
+  const energy = currentEnergy();
+  const owned = currentUpgrades();
+  $('upgrade-title').textContent = upgradeCtx.kind === 'campaign'
+    ? `${set.name} cleared — choose an upgrade`
+    : `Wave ${run.wavesCleared} survived — choose an upgrade`;
+  $('upgrade-energy').textContent = `Energy: ${energy}`;
+  const ownedNames = UPGRADE_ORDER.filter((id) => upgradeLevel(owned, id) > 0)
+    .map((id) => `${UPGRADES[id].name} ${'I'.repeat(upgradeLevel(owned, id))}`);
+  $('upgrade-owned').textContent = ownedNames.length
+    ? `Owned: ${ownedNames.join(' · ')}`
+    : 'No upgrades yet — spend energy to build the ship.';
+  const wrap = $('upgrade-cards');
+  wrap.innerHTML = '';
+  if (!upgradeCtx.offers.length) {
+    const p = document.createElement('p');
+    p.className = 'upgrade-empty';
+    p.textContent = 'Every upgrade is maxed — the ship is at its peak. Bank the energy and keep flying.';
+    wrap.appendChild(p);
+  }
+  upgradeCtx.offers.forEach((id, i) => {
+    const u = UPGRADES[id];
+    const level = upgradeLevel(owned, id);
+    const maxed = level >= u.max;
+    const cost = maxed ? null : u.cost[level];
+    const affordable = cost !== null && energy >= cost;
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'upgrade-card' + (maxed ? ' maxed' : affordable ? '' : ' unaffordable');
+    card.innerHTML = `<span class="upgrade-name">${u.name}</span>`
+      + `<span class="upgrade-level">Level ${level} &rarr; ${level + 1} (max ${u.max})</span>`
+      + `<span class="upgrade-desc">${u.desc}</span>`
+      + (maxed
+        ? '<span class="upgrade-cost">Maxed out</span>'
+        : `<span class="upgrade-cost">${affordable ? `Cost: ${cost} energy` : `Cost: ${cost} energy — not enough`}</span>`)
+      + `<span class="upgrade-key">Press ${i + 1}</span>`;
+    card.addEventListener('click', () => buyUpgrade(id));
+    card.addEventListener('mouseenter', () => { if (audioCtx) sfx('tick'); });
+    wrap.appendChild(card);
+  });
+  const cont = $('btn-upgrade-continue');
+  cont.textContent = upgradeCtx.kind === 'campaign'
+    ? `Continue — Set ${Math.min(save.campaign.nextSet, WAVE_SETS.length)} of 12`
+    : 'Continue — next wave';
+  cont.focus();
+}
+function buyUpgrade(id) {
+  if (!upgradeCtx) return;
+  const res = applyUpgrade(currentUpgrades(), id, currentEnergy());
+  if (!res) { sfx('tick'); toast('Not enough energy for that upgrade'); return; }
+  if (upgradeCtx.kind === 'campaign') {
+    save.campaign.upgrades = res.upgrades;
+    save.campaign.energy = res.energy;
+  } else {
+    // Survival buys apply to the live run immediately.
+    run.upgrades = res.upgrades;
+    run.energy = res.energy;
+    const stats = upgradeStats(run.upgrades);
+    run.fireInterval = stats.fireInterval;
+    run.bulletCount = stats.bullets;
+    run.bulletDamage = stats.damage;
+    run.dashCooldown = stats.dashCooldown;
+    run.magnetRadius = stats.magnetRadius;
+    if (stats.maxShields > run.maxShields) {
+      run.shields += stats.maxShields - run.maxShields;
+      run.maxShields = stats.maxShields;
+    }
+  }
+  persistSave();
+  sfx('upgrade');
+  renderUpgradeCards();
+}
+function continueFromUpgrade() {
+  if (!upgradeCtx) return;
+  const kind = upgradeCtx.kind;
+  upgradeCtx = null;
+  if (kind === 'campaign') {
+    const c = save.campaign;
+    startRun(c.nextSet, { mode: 'campaign', upgrades: c.upgrades, energy: c.energy, score: c.score });
+  } else {
+    // Survival: the breather was frozen while the screen was open;
+    // resuming lets it finish and the next wave starts.
+    popScreen();
+    phase = 'run';
+    ensureAudio();
   }
 }
 
@@ -983,7 +1276,7 @@ window.addEventListener('keydown', (e) => {
   }
   if (e.code === 'KeyM') { ensureAudio(); setMuted(!save.muted); }
   if (e.code === 'KeyR' && (phase === 'run' || phase === 'paused' || phase === 'runover' || phase === 'complete')) {
-    sfx('launch'); startRun(selectedSetId);
+    sfx('launch'); restartCurrentRun();
   }
   if (e.code === 'Escape') {
     if (phase === 'run') pauseGame();
@@ -992,8 +1285,17 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'Enter') {
     if (phase === 'menu' && screenStack[screenStack.length - 1] === 'menu') { ensureAudio(); sfx('launch'); startRun(selectedSetId); }
     else if (phase === 'paused') resumeGame();
-    else if (phase === 'runover') { sfx('launch'); startRun(selectedSetId); }
-    else if (phase === 'complete') { sfx('launch'); startRun(Math.min(selectedSetId + 1, WAVE_SETS.length)); }
+    else if (phase === 'upgrade') continueFromUpgrade();
+    else if (phase === 'runover') { sfx('launch'); restartCurrentRun(); }
+    else if (phase === 'complete') {
+      sfx('launch');
+      if (mode === 'campaign') startCampaign();
+      else startRun(Math.min(selectedSetId + 1, WAVE_SETS.length));
+    }
+  }
+  if (phase === 'upgrade' && ['Digit1', 'Digit2', 'Digit3'].includes(e.code)) {
+    const idx = Number(e.code.slice(-1)) - 1;
+    if (upgradeCtx && upgradeCtx.offers[idx]) buyUpgrade(upgradeCtx.offers[idx]);
   }
   if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
 });
@@ -1113,15 +1415,18 @@ function updateHUD() {
   const mult = comboMultiplier(run.combo);
   setText('hud-combo', run.combo >= 2 ? `Combo x${mult.toFixed(1)} (${run.combo})` : 'Combo x1.0');
   $('hud-combo').classList.toggle('hot', run.combo >= 10);
-  setText('hud-wave', `Wave ${run.waveIndex + 1}/${set.waves.length}`);
+  setText('hud-wave', run.mode === 'survival' ? `Wave ${run.waveIndex + 1}` : `Wave ${run.waveIndex + 1}/${set.waves.length}`);
   setText('hud-energy', `Energy ${run.energy}`);
+  const ownedUpgrades = UPGRADE_ORDER.filter((id) => upgradeLevel(run.upgrades, id) > 0)
+    .map((id) => `${UPGRADES[id].name.split(' ')[0]} ${'I'.repeat(upgradeLevel(run.upgrades, id))}`);
+  setText('hud-upgrades', ownedUpgrades.join(' · '));
   const shields = $('hud-shields');
   let html = '';
   for (let i = 0; i < run.maxShields; i++) {
     html += i < run.shields ? '◆' : '<span class="lost">◆</span>';
   }
   if (hudCache.shields !== html) { hudCache.shields = html; shields.innerHTML = html; }
-  const frac = run.dashCd > 0 ? 1 - run.dashCd / DASH_COOLDOWN : 1;
+  const frac = run.dashCd > 0 ? 1 - run.dashCd / run.dashCooldown : 1;
   $('dash-fill').style.transform = `scaleX(${frac})`;
   $('dash-label').textContent = frac >= 1 ? 'DASH READY' : 'DASH';
   // Low-shield vignette: on while flying on the last shield, off
@@ -1273,6 +1578,16 @@ function frame(now) {
       steps++;
     }
     if (steps === 4) accumulator = 0; // drop backlog under slow rendering
+    // Survival: every 3 waves survived, the breather opens the
+    // upgrade screen instead of rolling straight into the next wave.
+    // The breather timer is frozen while the screen is open (the sim
+    // only steps in the 'run' phase), so the next wave starts when
+    // the player continues.
+    if (run.mode === 'survival' && run.waveState === 'breather' && run.wavesCleared > 0
+      && run.wavesCleared % 3 === 0 && run.lastUpgradeWave !== run.wavesCleared) {
+      run.lastUpgradeWave = run.wavesCleared;
+      openUpgrade('survival');
+    }
     if (run.done) endRun();
   } else if (phase === 'menu' && demoRun) {
     // Attract flight: the demo ship plays wave set 1 behind the menu.
@@ -1318,6 +1633,7 @@ window.__nova = {
   get state() {
     return {
       phase,
+      mode,
       setId: set ? set.id : null,
       selectedSetId,
       shields: run ? run.shields : null,
@@ -1331,8 +1647,16 @@ window.__nova = {
     return WAVE_SETS.map((s) => ({
       id: s.id, name: s.name, waves: s.waves.length,
       best: save.best[s.id] || null,
+      unlocked: isSetUnlocked(save.best, s.id),
     }));
   },
+  unlocks() {
+    return {
+      sets: Object.fromEntries(WAVE_SETS.map((s) => [s.id, isSetUnlocked(save.best, s.id)])),
+      survival: isSurvivalUnlocked(save.best),
+    };
+  },
+  campaign() { return JSON.parse(JSON.stringify(save.campaign)); },
   info() {
     // In the menu phase there is no run yet — report the attract
     // flight instead, so the render check can prove the menu scene
@@ -1346,6 +1670,7 @@ window.__nova = {
     const aimSp = projectToScreen(r.aimX, 0, r.aimZ);
     return {
       setId: set.id, setName: set.name, waves: set.waves.length,
+      mode: r.mode, upgrades: { ...r.upgrades },
       waveIndex: r.waveIndex, waveState: r.waveState,
       shields: r.shields, maxShields: r.maxShields,
       score: r.score, energy: r.energy,
@@ -1380,7 +1705,9 @@ window.__nova = {
     };
   },
   start(setId) { startRun(setId ?? selectedSetId); },
-  restart() { startRun(selectedSetId); },
+  startCampaign() { startCampaign(); },
+  startSurvival() { startSurvival(); },
+  restart() { restartCurrentRun(); },
   pause() { pauseGame(); },
   resume() { resumeGame(); },
   quitToMenu() { quitToMenu(); },

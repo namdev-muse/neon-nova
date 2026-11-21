@@ -1,19 +1,24 @@
-// Neon Nova v0.3.0 — pure simulation core (no DOM, no Three.js).
+// Neon Nova v0.4.0 — pure simulation core (no DOM, no Three.js).
 // The ship flies freely in a bounded neon arena (angled top-down view);
 // the player moves with WASD/arrows (momentum), aims with the mouse,
 // fires to destroy waves of enemies, and dashes (Shift) through danger
 // with a cooldown + brief invulnerability. Enemies: chasers, shooters,
 // splitters (which burst into two minis). The run ends when the wave
 // set is cleared (all waves) or the ship loses all 3 shields.
-// Deterministic: every wave set is built from a fixed seed, and the
-// fixed-step simulation gives identical results for identical inputs.
+// M4 adds progression: ship upgrades bought with energy (Rapid Fire,
+// Twin Shot, Heavy Rounds, Reinforced Hull, Dash Recharge, Magnet
+// Core), a Campaign mode (sets 1-12 in sequence, upgrades carry),
+// and a Survival mode (endless escalating waves, upgrade draft every
+// 3 waves). Deterministic: every wave set is built from a fixed seed,
+// and the fixed-step simulation gives identical results for identical
+// inputs.
 //
 // Anti-slop: no auto-aim, no auto-fire, no assist of any kind. The
 // bot plays through the same stepRun + public input hooks, and must
 // move AND aim with real decisions; sitting still and holding fire
 // fails every wave set (see simulateRun + the bot harness).
 
-export const VERSION = '0.3.0';
+export const VERSION = '0.4.0';
 export const ARENA_HALF_X = 34;
 export const ARENA_HALF_Z = 20;
 export const SHIP_RADIUS = 0.9;
@@ -34,7 +39,7 @@ export const DASH_SPEED = 55;
 export const DASH_INVULN = 0.4;
 export const STUN_SECONDS = 0.6;
 export const INVULN_SECONDS = 1.5;
-export const COMBO_WINDOW = 3.5; // seconds without a kill before the combo resets
+export const COMBO_WINDOW = 2.5; // seconds without a kill before the combo resets (M4: tightened from 3.5 — the multiplier sat at x4 from wave 2 on)
 export const COMBO_STEP = 0.1; // +10% score per combo kill, capped
 export const COMBO_CAP = 30; // combo count at which the multiplier caps (x4)
 export const WAVE_BREATHER = 1.5; // seconds between waves
@@ -42,7 +47,76 @@ export const WAVE_CLEAR_SCORE = 250;
 export const SET_CLEAR_SCORE = 1000;
 export const PICKUP_SCORE = 25;
 export const SPAWN_IN_SECONDS = 0.4; // enemies materialise (harmless) before they can fight
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2;
+
+// --- upgrades (M4) ---
+// Energy is the currency: gold pickups are worth 1 energy each (plus
+// 25 score). Upgrades are bought on the upgrade screen between
+// campaign sets and every 3 survival waves. Total cost of everything
+// is 163 — a great campaign collector earns roughly 150-200, so one
+// campaign cannot max the ship; the player has to choose a build.
+// Levels are earned, never random: every level is a real, readable
+// change to how the ship flies and shoots.
+export const UPGRADES = {
+  rapid: { id: 'rapid', name: 'Rapid Fire', desc: 'Fire 15% faster', max: 3, cost: [8, 12, 16] },
+  twin: { id: 'twin', name: 'Twin Shot', desc: '+1 projectile per shot', max: 2, cost: [15, 25] },
+  heavy: { id: 'heavy', name: 'Heavy Rounds', desc: 'Bullets deal +1 damage', max: 1, cost: [18] },
+  hull: { id: 'hull', name: 'Reinforced Hull', desc: '+1 max shield', max: 2, cost: [12, 18] },
+  dash: { id: 'dash', name: 'Dash Recharge', desc: 'Dash recharges 25% faster', max: 2, cost: [10, 14] },
+  magnet: { id: 'magnet', name: 'Magnet Core', desc: 'Energy pulls from farther away', max: 2, cost: [5, 10] },
+};
+export const UPGRADE_ORDER = ['rapid', 'twin', 'heavy', 'hull', 'dash', 'magnet'];
+export function upgradeLevel(upgrades, id) {
+  if (!upgrades || typeof upgrades !== 'object' || !UPGRADES[id]) return 0;
+  return clamp(Math.floor(upgrades[id] || 0), 0, UPGRADES[id].max);
+}
+// Derived ship stats for a given upgrade loadout. The sim reads these
+// off the run (set at run creation), never the base constants, so an
+// upgraded ship and a stock ship are the same code path.
+export function upgradeStats(upgrades = {}) {
+  return {
+    fireInterval: FIRE_INTERVAL * Math.pow(0.85, upgradeLevel(upgrades, 'rapid')),
+    bullets: 1 + upgradeLevel(upgrades, 'twin'),
+    damage: 1 + upgradeLevel(upgrades, 'heavy'),
+    dashCooldown: DASH_COOLDOWN * Math.pow(0.75, upgradeLevel(upgrades, 'dash')),
+    magnetRadius: 5 + 4 * upgradeLevel(upgrades, 'magnet'),
+    maxShields: SHIELDS + upgradeLevel(upgrades, 'hull'),
+  };
+}
+export function upgradeCost(id, level) {
+  const u = UPGRADES[id];
+  if (!u || level >= u.max) return null;
+  return u.cost[level];
+}
+// Buy the next level of an upgrade. Returns the new state or null
+// when the purchase is impossible (maxed, or not enough energy).
+export function applyUpgrade(upgrades, id, energy) {
+  const u = UPGRADES[id];
+  if (!u) return null;
+  const level = upgradeLevel(upgrades, id);
+  const cost = upgradeCost(id, level);
+  if (cost === null || energy < cost) return null;
+  const next = { ...(upgrades || {}) };
+  next[id] = level + 1;
+  return { upgrades: next, energy: energy - cost, cost, level: level + 1 };
+}
+
+// --- unlock gates (M4) ---
+// Best-score gates: set N+1 unlocks when set N is cleared (best
+// waves == the set's wave count), and Survival unlocks when set 1 is
+// cleared. The gates live in the menu only — startRun itself never
+// enforces them, so the bot and render check can still start any set
+// through the public hooks.
+export function isSetUnlocked(best, id) {
+  if (id <= 1) return true;
+  const prev = best ? best[id - 1] : null;
+  const prevSet = WAVE_SETS[id - 2];
+  return !!prev && prev.waves >= prevSet.waves.length;
+}
+export function isSurvivalUnlocked(best) {
+  const first = best ? best[1] : null;
+  return !!first && first.waves >= WAVE_SETS[0].waves.length;
+}
 
 // --- seeded RNG (mulberry32) ---
 export function mulberry32(seed) {
@@ -130,8 +204,12 @@ export const WAVE_SETS = [
     waves: [
       { groups: [{ type: 'chaser', count: 6, delay: 0 }, { type: 'chaser', count: 5, delay: 1.5 }] },
       { groups: [{ type: 'chaser', count: 6, delay: 0 }, { type: 'chaser', count: 6, delay: 1.5 }] },
-      { groups: [{ type: 'chaser', count: 6, delay: 0 }, { type: 'shooter', count: 2, delay: 1 }, { type: 'chaser', count: 5, delay: 2 }] },
-      { groups: [{ type: 'chaser', count: 7, delay: 0 }, { type: 'shooter', count: 3, delay: 1.5 }, { type: 'chaser', count: 5, delay: 2.5 }] },
+      // M4 playtest: the probe died twice in these shooter waves (bolt-
+      // blind, cold) — the teaching set introduces shooters, it does not
+      // execute with them. One shooter in wave 3, two in wave 4; set 2
+      // (Crossfire) is where shooter pressure properly starts.
+      { groups: [{ type: 'chaser', count: 6, delay: 0 }, { type: 'shooter', count: 1, delay: 1 }, { type: 'chaser', count: 5, delay: 2 }] },
+      { groups: [{ type: 'chaser', count: 7, delay: 0 }, { type: 'shooter', count: 2, delay: 1.5 }, { type: 'chaser', count: 5, delay: 2.5 }] },
     ],
   },
   {
@@ -269,6 +347,49 @@ export function waveSetById(id) {
   return WAVE_SETS.find((s) => s.id === id) || null;
 }
 
+// Survival mode (M4): endless escalating waves from a seed. Wave n
+// (0-based) is roughly a set-1 wave at n=0 and reaches set-12 wave
+// pressure around n=9, then keeps growing — the mode ends only when
+// the ship goes down. Shooters join from wave 2, splitters from wave
+// 3. Big groups are split into staggered arrivals of at most 10, 1.5s
+// apart (the M2 lesson: one huge simultaneous arrival is an unfair
+// wall, not a challenge), and types arrive in sequence — chasers,
+// then shooters, then splitters — so the player always reads the
+// wave as it forms.
+export function makeSurvivalSet(seed) {
+  return { id: 0, name: 'Survival', seed, survival: true, theme: WAVE_SETS[0].theme, waves: [] };
+}
+export function generateSurvivalWave(n) {
+  const chasers = Math.round(10 + n * 1.1);
+  const shooters = n >= 1 ? Math.round(1 + n * 0.55) : 0;
+  const splitters = n >= 2 ? Math.max(1, Math.round((n - 1) * 0.45)) : 0;
+  const groups = [];
+  function addGroups(type, count, baseDelay, chunk) {
+    let left = count, delay = baseDelay;
+    while (left > 0) {
+      const c = Math.min(chunk, left);
+      groups.push({ type, count: c, delay });
+      left -= c;
+      delay += 1.5;
+    }
+  }
+  // Chasers arrive in groups of at most 6: a 10-chaser wave 1 is two
+  // staggered arrivals, and a stationary ship cannot cover both
+  // directions at once — the second group punishes a ship that never
+  // moves (the anti-slop gate for an endless mode: the teaching wave
+  // must still demand movement).
+  addGroups('chaser', chasers, 0, 6);
+  addGroups('shooter', shooters, 1, 10);
+  addGroups('splitter', splitters, 2, 10);
+  return { groups };
+}
+export function survivalWaveThreat(n) {
+  const w = generateSurvivalWave(n);
+  let t = 0;
+  for (const g of w.groups) t += g.count * (g.type === 'shooter' ? 1.5 : g.type === 'splitter' ? 2.5 : 1);
+  return t;
+}
+
 export function totalEnemiesInSet(set) {
   let n = 0;
   for (const w of set.waves) for (const g of w.groups) n += g.count;
@@ -293,22 +414,39 @@ export function comboMultiplier(combo) {
 }
 
 // --- run state ---
-export function createRun(set) {
+// opts: { mode: 'set' | 'campaign' | 'survival' (default 'set'),
+// upgrades: { id: level } (default {}), score: score carried in from
+// a campaign (default 0), energy: energy carried in (default 0) }.
+// Campaign/survival runs carry their score and energy in; a plain
+// set run always starts at 0. scoreAtStart is what the run began
+// with, so the per-set best records only what this set earned.
+export function createRun(set, opts = {}) {
+  const upgrades = { ...(opts.upgrades || {}) };
+  const stats = upgradeStats(upgrades);
+  const scoreAtStart = opts.score || 0;
   return {
     set,
+    mode: opts.mode || 'set',
+    upgrades,
     rng: mulberry32(set.seed),
     x: 0, z: 0, vx: 0, vz: 0,
     aimX: 0, aimZ: -10, angle: -Math.PI / 2,
     fireCd: 0, dashCd: 0, dashTime: 0, dashDx: 0, dashDz: 0,
     stun: 0, invuln: 0,
-    shields: SHIELDS, maxShields: SHIELDS,
-    score: 0, energy: 0, combo: 0, comboTimer: 0, maxCombo: 0,
+    shields: stats.maxShields, maxShields: stats.maxShields,
+    fireInterval: stats.fireInterval, bulletCount: stats.bullets,
+    bulletDamage: stats.damage, dashCooldown: stats.dashCooldown,
+    magnetRadius: stats.magnetRadius,
+    score: scoreAtStart, scoreAtStart,
+    energy: opts.energy || 0,
+    combo: 0, comboTimer: 0, maxCombo: 0,
     kills: 0, shotsFired: 0, hitsTaken: 0, dashes: 0,
     waveIndex: 0, waveTime: 0, waveState: 'fight', // 'fight' | 'breather' | 'done'
     breatherT: 0, spawnQueue: [], nextEnemyId: 1,
     enemies: [], bullets: [], enemyBullets: [], pickups: [],
     wavesCleared: 0, pickupsCollected: 0,
     time: 0, done: false, reason: null, // 'complete' | 'runOver'
+    lastUpgradeWave: 0, // survival: wavesCleared at the last upgrade draft
   };
 }
 
@@ -362,7 +500,9 @@ function spawnEnemy(run, type) {
 }
 
 function startWave(run) {
-  const wave = run.set.waves[run.waveIndex];
+  // Survival waves are generated on demand from the wave index, so
+  // the mode never runs out of waves.
+  const wave = run.set.survival ? generateSurvivalWave(run.waveIndex) : run.set.waves[run.waveIndex];
   run.spawnQueue = [];
   for (const g of wave.groups) {
     for (let i = 0; i < g.count; i++) run.spawnQueue.push({ t: g.delay, type: g.type });
@@ -372,8 +512,8 @@ function startWave(run) {
   run.waveState = 'fight';
 }
 
-export function startRun(set) {
-  const run = createRun(set);
+export function startRun(set, opts = {}) {
+  const run = createRun(set, opts);
   startWave(run);
   return run;
 }
@@ -464,14 +604,15 @@ export function stepRun(run, input, dt = DT) {
   }
 
   // Dash: a burst in the current move direction (or the aim direction
-  // when standing still), with brief invulnerability.
+  // when standing still), with brief invulnerability. Cooldown comes
+  // from the run (upgrades can shorten it).
   if (input.dash && run.dashCd <= 0 && run.dashTime <= 0 && run.stun <= 0) {
     let dx = clamp(input.mx || 0, -1, 1), dz = clamp(input.mz || 0, -1, 1);
     if (Math.hypot(dx, dz) < 0.2) { dx = Math.cos(run.angle); dz = Math.sin(run.angle); }
     const d = Math.hypot(dx, dz) || 1;
     run.dashDx = dx / d; run.dashDz = dz / d;
     run.dashTime = DASH_DURATION;
-    run.dashCd = DASH_COOLDOWN;
+    run.dashCd = run.dashCooldown;
     run.invuln = Math.max(run.invuln, DASH_INVULN);
     run.dashes++;
     events.push({ type: 'dash', x: run.x, z: run.z });
@@ -500,19 +641,26 @@ export function stepRun(run, input, dt = DT) {
   if (run.z < -ARENA_HALF_Z + SHIP_RADIUS) { run.z = -ARENA_HALF_Z + SHIP_RADIUS; run.vz = Math.max(0, run.vz); }
   if (run.z > ARENA_HALF_Z - SHIP_RADIUS) { run.z = ARENA_HALF_Z - SHIP_RADIUS; run.vz = Math.min(0, run.vz); }
 
-  // Fire.
+  // Fire: interval and projectile count come from the run (upgrades).
+  // Twin Shot fires parallel bullets with a small spread — still
+  // aimed fire, no auto-aim: every bullet goes where the player points.
   if (input.fire && run.fireCd <= 0 && run.stun <= 0) {
-    run.fireCd = FIRE_INTERVAL;
+    run.fireCd = run.fireInterval;
     run.shotsFired++;
-    const bx = run.x + Math.cos(run.angle) * 1.4;
-    const bz = run.z + Math.sin(run.angle) * 1.4;
-    run.bullets.push({
-      x: bx, z: bz,
-      vx: Math.cos(run.angle) * BULLET_SPEED,
-      vz: Math.sin(run.angle) * BULLET_SPEED,
-      life: BULLET_LIFE, r: BULLET_RADIUS,
-    });
-    events.push({ type: 'shoot', x: bx, z: bz });
+    const n = run.bulletCount;
+    for (let i = 0; i < n; i++) {
+      const off = n === 1 ? 0 : (i - (n - 1) / 2) * 0.09;
+      const a = run.angle + off;
+      const bx = run.x + Math.cos(a) * 1.4;
+      const bz = run.z + Math.sin(a) * 1.4;
+      run.bullets.push({
+        x: bx, z: bz,
+        vx: Math.cos(a) * BULLET_SPEED,
+        vz: Math.sin(a) * BULLET_SPEED,
+        life: BULLET_LIFE, r: BULLET_RADIUS,
+      });
+    }
+    events.push({ type: 'shoot', x: run.x + Math.cos(run.angle) * 1.4, z: run.z + Math.sin(run.angle) * 1.4 });
   }
 
   // Spawn the wave's groups on schedule.
@@ -578,7 +726,7 @@ export function stepRun(run, input, dt = DT) {
       if (e.spawnT > 0) continue;
       if (Math.hypot(b.x - e.x, b.z - e.z) < b.r + e.r) {
         run.bullets.splice(run.bullets.indexOf(b), 1);
-        e.hp -= 1;
+        e.hp -= run.bulletDamage;
         events.push({ type: 'bulletHit', id: e.id, x: b.x, z: b.z, kind: e.type });
         if (e.hp <= 0) killEnemy(run, e, events);
         break;
@@ -620,12 +768,13 @@ export function stepRun(run, input, dt = DT) {
   }
 
   // Pickups: drift, magnet toward the ship when close, collect.
+  // Magnet radius comes from the run (Magnet Core widens it).
   for (const p of [...run.pickups]) {
     p.life -= dt;
     if (p.life <= 0) { run.pickups.splice(run.pickups.indexOf(p), 1); continue; }
     const dx = run.x - p.x, dz = run.z - p.z;
     const d = Math.hypot(dx, dz) || 1;
-    if (d < 5) { p.vx += (dx / d) * 26 * dt; p.vz += (dz / d) * 26 * dt; }
+    if (d < run.magnetRadius) { p.vx += (dx / d) * 26 * dt; p.vz += (dz / d) * 26 * dt; }
     p.vx *= Math.exp(-2 * dt); p.vz *= Math.exp(-2 * dt);
     p.x += p.vx * dt; p.z += p.vz * dt;
     if (d < p.r + SHIP_RADIUS + 0.4) {
@@ -638,11 +787,15 @@ export function stepRun(run, input, dt = DT) {
   }
 
   // Wave cleared: the queue is empty and the arena is clear.
+  // Survival pays a wave bonus that grows with the wave number —
+  // the deeper you go, the more each wave is worth — and never
+  // completes: the next wave is always generated.
   if (run.waveState === 'fight' && run.spawnQueue.length === 0 && run.enemies.length === 0) {
     run.wavesCleared++;
-    run.score += WAVE_CLEAR_SCORE;
-    events.push({ type: 'waveClear', wave: run.waveIndex + 1, score: WAVE_CLEAR_SCORE });
-    if (run.waveIndex + 1 >= run.set.waves.length) {
+    const bonus = run.set.survival ? WAVE_CLEAR_SCORE + 50 * run.waveIndex : WAVE_CLEAR_SCORE;
+    run.score += bonus;
+    events.push({ type: 'waveClear', wave: run.waveIndex + 1, score: bonus });
+    if (!run.set.survival && run.waveIndex + 1 >= run.set.waves.length) {
       run.waveState = 'done';
       run.done = true;
       run.reason = 'complete';
@@ -774,8 +927,10 @@ export function greedyPolicy(run) {
 }
 
 // Simulate a whole wave set with a policy function. Returns the outcome.
-export function simulateRun(set, policy) {
-  const run = startRun(set);
+// opts pass through to startRun (mode, upgrades, score, energy) — the
+// bot can play a campaign set with a loadout, or a survival run.
+export function simulateRun(set, policy, opts = {}) {
+  const run = startRun(set, opts);
   const maxSteps = Math.ceil(600 / DT); // 10 minutes of game time
   let steps = 0;
   const events = [];
@@ -800,9 +955,17 @@ export function simulateRun(set, policy) {
 export function defaultSave() {
   return {
     version: SAVE_VERSION, best: {},
+    // Campaign progress (M4): the next set to play, the score and
+    // energy carried across sets, the upgrades bought so far, and the
+    // best campaign total. Quitting to the menu keeps the campaign;
+    // only death or finishing set 12 resets it.
+    campaign: { nextSet: 1, score: 0, energy: 0, upgrades: {}, best: 0 },
     totalRuns: 0, muted: false, shake: 1,
     reduceFlashing: null, music: true, sfx: true, volume: 0.6,
   };
+}
+export function defaultCampaign() {
+  return { nextSet: 1, score: 0, energy: 0, upgrades: {}, best: 0 };
 }
 export function serializeSave(save) { return JSON.stringify(save); }
 export function parseSave(text) {
@@ -812,12 +975,27 @@ export function parseSave(text) {
     if (!s || typeof s !== 'object') return d;
     if (s.best && typeof s.best === 'object') {
       for (const [k, v] of Object.entries(s.best)) {
-        if (/^(?:[1-9]|1[0-2])$/.test(k) && v && typeof v === 'object'
+        // Per-set bests (1-12) and the survival best ('survival').
+        if ((/^(?:[1-9]|1[0-2])$/.test(k) || k === 'survival') && v && typeof v === 'object'
           && Number.isFinite(v.score) && Number.isFinite(v.waves)) {
           d.best[k] = {
             score: clamp(Math.floor(v.score), 0, 10000000),
-            waves: clamp(Math.floor(v.waves), 0, 6),
+            waves: clamp(Math.floor(v.waves), 0, 60),
           };
+        }
+      }
+    }
+    if (s.campaign && typeof s.campaign === 'object') {
+      const c = s.campaign;
+      d.campaign.nextSet = Number.isInteger(c.nextSet) ? clamp(c.nextSet, 1, 13) : 1;
+      d.campaign.score = Number.isFinite(c.score) ? clamp(Math.floor(c.score), 0, 10000000) : 0;
+      d.campaign.energy = Number.isFinite(c.energy) ? clamp(Math.floor(c.energy), 0, 10000) : 0;
+      d.campaign.best = Number.isFinite(c.best) ? clamp(Math.floor(c.best), 0, 10000000) : 0;
+      if (c.upgrades && typeof c.upgrades === 'object') {
+        for (const [id, lvl] of Object.entries(c.upgrades)) {
+          if (UPGRADES[id] && Number.isInteger(lvl)) {
+            d.campaign.upgrades[id] = clamp(lvl, 0, UPGRADES[id].max);
+          }
         }
       }
     }

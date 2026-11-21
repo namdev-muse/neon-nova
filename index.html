@@ -31,6 +31,7 @@
     <span id="hud-score">Score 0</span>
     <span id="hud-combo" class="hud-combo">Combo x1.0</span>
     <span id="hud-energy">Energy 0</span>
+    <span id="hud-upgrades" class="hud-upgrades"></span>
   </div>
   <div class="hud-right">
     <div id="hud-dash" class="hud-dash" aria-label="Dash cooldown">
@@ -53,10 +54,13 @@
     <p id="webgl-error" class="webgl-error hidden">3D graphics couldn't start in this browser — Neon Nova needs WebGL. Try a recent Chrome, Edge or Firefox on a device with graphics support.</p>
     <div class="menu-col menu-actions">
       <button id="btn-play" class="btn primary" type="button">Play</button>
+      <button id="btn-campaign" class="btn" type="button">Campaign</button>
+      <button id="btn-survival" class="btn" type="button">Survival</button>
       <button id="btn-howto" class="btn" type="button">How to Play</button>
       <button id="btn-settings" class="btn" type="button">Settings</button>
       <button id="btn-mute-menu" class="btn small" type="button">Sound: On</button>
       <p id="menu-best" class="menu-best"></p>
+      <p id="menu-campaign" class="menu-best"></p>
     </div>
     <div class="menu-col menu-setup">
       <div id="set-select" class="set-select" aria-label="Wave set select"></div>
@@ -75,9 +79,10 @@
       <li><strong>Dash</strong> with <strong>Shift</strong> to burst through danger. It has a short cooldown and a moment of invulnerability — spend it when the swarm closes in.</li>
       <li><strong>Chasers</strong> fly straight at you. <strong>Shooters</strong> hold their distance and fire bolts — watch the telegraph flash, then move. <strong>Splitters</strong> burst into two minis when they die.</li>
       <li>Kills chain a <strong>combo</strong> — every kill within a few seconds raises the multiplier, up to x4. Taking a hit resets it.</li>
-      <li>Enemies drop <strong>gold energy</strong> — fly over it to collect. Clear every wave to finish the set.</li>
+      <li>Enemies drop <strong>gold energy</strong> — fly over it to collect. Energy is currency: spend it on <strong>ship upgrades</strong> between campaign sets and every 3 survival waves. Clear every wave to finish the set.</li>
       <li>You have <strong>3 shields</strong>. A hit costs one and stuns the ship; lose all three and the run ends. Standing still is how you die — the swarm comes from every side.</li>
-      <li>Your <strong>best score</strong> is saved per wave set — beat it.</li>
+      <li>Your <strong>best score</strong> is saved per wave set — beat it. Clearing a set unlocks the next one; clearing Set 1 unlocks <strong>Survival</strong>, endless waves that never stop.</li>
+      <li><strong>Campaign</strong> plays all 12 sets in a row — score, energy and upgrades carry across sets, and death ends the campaign. <strong>Survival</strong> is endless: how deep can you go?</li>
     </ul>
     <h3>Controls</h3>
     <ul class="howto-list">
@@ -112,6 +117,17 @@
       <input id="reduce-flashing" type="checkbox" aria-label="Reduce flashing — no bright flashes">
     </label>
     <button id="btn-settings-close" class="btn primary" type="button">Back to Menu</button>
+  </div>
+</div>
+
+<!-- Upgrade draft (between campaign sets / every 3 survival waves) -->
+<div id="upgrade" class="overlay hidden">
+  <div class="panel panel-upgrade">
+    <h2 id="upgrade-title">Choose an upgrade</h2>
+    <p id="upgrade-energy" class="upgrade-energy">Energy: 0</p>
+    <p id="upgrade-owned" class="upgrade-owned"></p>
+    <div id="upgrade-cards" class="upgrade-cards"></div>
+    <button id="btn-upgrade-continue" class="btn primary" type="button">Continue</button>
   </div>
 </div>
 
