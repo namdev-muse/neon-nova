@@ -1,5 +1,32 @@
 # Neon Nova — devlog
 
+## M3 — Feel & juice (v0.3.0, 2026-11-21)
+
+Every combat event now fires its full layered bundle in one frame:
+kills burst into particles, a shockwave ring and a score pop; taking a
+hit shakes the camera, flashes the screen, squashes the ship, knocks it
+back and freezes time for a beat, with slow-mo on the last shield. The
+camera leans toward your aim and widens its field of view as you fly
+faster. The soundtrack layers a bass line, a bar pad and — from wave 2
+— a lead arpeggio; on the last shield a red vignette breathes at the
+edges and a soft heartbeat thumps. The audit that started this
+milestone found 5 of 9 bundles incomplete and one dead feature (the
+enemy hit-flash, never wired up since M1) — all fixed, and the render
+check now reads the bundles back from the live game's feedback log.
+One real bug surfaced along the way: ram knockback was inverted,
+shoving the ship into the rammer; it now pushes away from the source
+and was softened from 14 to 9 u/s after the correct direction killed
+the bot on sets 9 and 12. Result: smoke 208/208, bot completes all 12
+sets, render check clean, and a real-browser probe cleared set 1 (51
+kills, 18,130, combo x4.0) and fought set 7 to wave 2.
+
+### Known issues (M3)
+
+- Set 1 is still easy for a good player (clean clear, combo never
+  breaks) — the ramp lives in sets 2–12.
+- Combo window (3.5s) may be too forgiving — the multiplier sits at
+  x4.0 from wave 2 on. M4 economy tuning.
+
 ## M2 — Wave craft (v0.2.0, 2026-11-21)
 
 Twelve campaign wave sets, each with its own identity. The six new sets
