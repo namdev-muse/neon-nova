@@ -1,0 +1,80 @@
+# Neon Nova
+
+A 3D neon arena shooter — **move, aim, fire**. Pilot a ship in a bounded
+neon arena, destroy waves of enemies, dash through danger, and chain
+kills into a combo. Chasers fly straight at you, shooters hold their
+distance and fire bolts, splitters burst into minis when they die. You
+have 3 shields: a hit costs one and stuns the ship; lose all three and
+the run ends. Clear every wave to finish the set. Score comes from kills
+× combo multiplier + wave bonuses — your best score is saved per wave set.
+
+**Live:** https://namdev-muse.github.io/neon-nova/
+**Version:** v0.1.0 (M1 core)
+**Stack:** Three.js 0.160.0 (pinned via jsdelivr import map, no build step), vanilla HTML/CSS/JS, Web Audio synth SFX + generative music, GitHub Pages.
+
+## Gameplay
+
+Real captures from a headless-Chromium run of the game
+(`npm run screenshots` regenerates them — see `tests/screenshots.js`).
+
+![Main menu over the live 3D attract scene](docs/screenshots/menu.png)
+![Mid-run on First Contact — the ship fires at the swarm](docs/screenshots/gameplay.png)
+![Ship down — best score saved](docs/screenshots/runover.png)
+
+## The core: aim + positioning is the skill
+
+The ship flies freely in a bounded arena and only you move it — there
+is no auto-aim, no auto-fire, no assist. Movement has momentum and the
+ship banks into its strafe, so you steer early and commit. Your shots go
+exactly where the crosshair points. Dash (Shift) bursts through danger
+with a short cooldown and a moment of invulnerability — spend it when
+the swarm closes in. Standing still is how you die: enemies spawn on a
+ring around the ship and close from every side, faster than one aim line
+can kill them. The bot harness proves it — the greedy combat bot
+completes all 6 wave sets, while sitting still and holding fire fails
+all 6.
+
+## Wave sets
+
+Six hand-crafted wave sets, each with its own identity (palette, enemy
+mix, spawn rhythm):
+
+| # | Wave set | Identity |
+|---|----------|----------|
+| 1 | First Contact | Chasers only at first — move, aim, fire; shooters join late |
+| 2 | Crossfire | Shooters hold their distance and fire bolts |
+| 3 | Split Decision | Splitters burst into minis — kill them where you have room |
+| 4 | Pincer | Everything at once, from both flanks |
+| 5 | Swarm Tide | The tide does not stop — thin the swarm, chain the combo |
+| 6 | Nova Gauntlet | Everything you learned, all at once |
+
+## Controls
+
+- **WASD / arrows:** move (momentum + banking)
+- **Mouse:** aim — **Click / Space:** fire
+- **Shift:** dash (cooldown + brief invulnerability)
+- **P:** pause — **M:** mute — **R:** restart
+- **Touch:** left stick moves, drag right side to aim and fire, DASH button dashes
+
+## Development
+
+```sh
+npm test            # smoke tests + bot harness (Node, no browser)
+npm run render-check  # headless Chromium: menu, movement, screen-space aim, firing, dash, kill, wave clear, shield loss, run-over
+npm run screenshots   # README captures + 3-resolution size sweep (inspect by eye)
+```
+
+## Tests
+
+- **Smoke (183 checks):** wave sets, movement momentum, aim, fire rate,
+  dash, kills/combo/score, splitters, shooter bolts, shield loss,
+  wave flow, determinism, the anti-slop gate, feedback tiers + layers,
+  save round-trip.
+- **Bot:** the greedy combat bot (kites, leads its aim, dodges bolts,
+  dashes out of crushes) completes all 6 wave sets; sitting still and
+  holding fire fails all 6.
+- **Render check:** headless Chromium — menu over a live 3D attract
+  scene, Play starts a run, movement and aim asserted in *screen* space,
+  firing, dash, kill, wave-1 clear, shield loss with the flashing
+  toggle, pause/resume/restart, run-over, best score saved — zero
+  console errors.
