@@ -1,4 +1,4 @@
-// Neon Nova v0.1.0 — Node smoke tests for physics.js (no DOM, no Three.js).
+// Neon Nova v0.2.0 — Node smoke tests for physics.js (no DOM, no Three.js).
 import {
   VERSION, WAVE_SETS, waveSetById, totalEnemiesInSet, setThreat, comboMultiplier,
   createRun, startRun, stepRun, simulateRun, stationaryPolicy, greedyPolicy,
@@ -17,18 +17,21 @@ function check(name, cond) {
 }
 function approx(a, b, eps = 1e-9) { return Math.abs(a - b) <= eps; }
 
-check('physics version is 0.1.0', VERSION === '0.1.0');
-check('6 wave sets defined', WAVE_SETS.length === 6);
-check('wave set ids are 1..6 in order', WAVE_SETS.every((s, i) => s.id === i + 1));
+check('physics version is 0.2.0', VERSION === '0.2.0');
+check('12 wave sets defined', WAVE_SETS.length === 12);
+check('wave set ids are 1..12 in order', WAVE_SETS.every((s, i) => s.id === i + 1));
 check('every wave set has a name and a hint', WAVE_SETS.every((s) => s.name && s.hint));
-check('every wave set has a distinct theme disc', new Set(WAVE_SETS.map((s) => s.theme.disc)).size === 6);
-check('every wave set has a distinct theme ring', new Set(WAVE_SETS.map((s) => s.theme.ring)).size === 6);
+check('every wave set has a distinct theme disc', new Set(WAVE_SETS.map((s) => s.theme.disc)).size === 12);
+check('every wave set has a distinct theme ring', new Set(WAVE_SETS.map((s) => s.theme.ring)).size === 12);
 check('waveSetById finds set 3', waveSetById(3) && waveSetById(3).name === 'Split Decision');
 check('waveSetById finds set 6', waveSetById(6) && waveSetById(6).name === 'Nova Gauntlet');
+check('waveSetById finds set 12', waveSetById(12) && waveSetById(12).name === 'Final Nova');
 check('waveSetById returns null for unknown id', waveSetById(99) === null);
 check('every wave set has 4-5 waves', WAVE_SETS.every((s) => s.waves.length >= 4 && s.waves.length <= 5));
 check('every wave set is dense (15+ enemies)', WAVE_SETS.every((s) => totalEnemiesInSet(s) >= 15));
 check('threat grows with difficulty (headcount + deadlier mixes)', WAVE_SETS.every((s, i) => i === 0 || setThreat(s) > setThreat(WAVE_SETS[i - 1])));
+check('no difficulty cliff: each set is within 1.6x of the previous set\'s threat',
+  WAVE_SETS.every((s, i) => i === 0 || setThreat(s) <= setThreat(WAVE_SETS[i - 1]) * 1.6));
 check('every wave set has chasers', WAVE_SETS.every((s) => s.waves.some((w) => w.groups.some((g) => g.type === 'chaser'))));
 check('sets 2+ introduce shooters', WAVE_SETS.slice(1).every((s) => s.waves.some((w) => w.groups.some((g) => g.type === 'shooter'))));
 check('sets 3+ introduce splitters', WAVE_SETS.slice(2).every((s) => s.waves.some((w) => w.groups.some((g) => g.type === 'splitter'))));
@@ -345,9 +348,12 @@ check('shoot, kill and pickup are small with no hit-stop',
   check('recordBest keeps the better of each', save.best[1].score === 1234 && save.best[1].waves === 4);
   recordBest(save, 6, 99999, 5);
   check('recordBest stores bests for set 6', save.best[6].score === 99999 && save.best[6].waves === 5);
+  recordBest(save, 12, 72745, 5);
+  check('recordBest stores bests for set 12', save.best[12].score === 72745 && save.best[12].waves === 5);
   const back = parseSave(serializeSave(save));
   check('save round-trips bests', back.best[1].score === 1234 && back.best[1].waves === 4);
   check('save round-trips set 6 bests', back.best[6].score === 99999 && back.best[6].waves === 5);
+  check('save round-trips set 12 bests', back.best[12].score === 72745 && back.best[12].waves === 5);
   check('garbage save text falls back to defaults', parseSave('not json').version === SAVE_VERSION);
   check('save drops bests for unknown sets', Object.keys(parseSave('{"best":{"99":{"score":1,"waves":1}}}').best).length === 0);
   check('save clamps absurd scores', parseSave('{"best":{"1":{"score":99999999,"waves":9}}}').best[1].score === 10000000);

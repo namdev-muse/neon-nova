@@ -1,9 +1,9 @@
-// Neon Nova v0.1.0 — headless Chromium render check.
+// Neon Nova v0.2.0 — headless Chromium render check.
 // Serves the game dir over local HTTP, loads it in headless Chromium, and
 // asserts the M1 core, by hook and by eye:
 //   - the menu renders over a LIVE 3D scene (the attract flight actually
 //     flies — the demo ship moves), with no version/engine text anywhere
-//     the player can see, one clear primary Play action, and 6 wave-set cards
+//     the player can see, one clear primary Play action, and 12 wave-set cards
 //   - Play starts a run: the HUD shows, the ship moves (hook + real keys),
 //     and movement direction is asserted in SCREEN space
 //   - aim is asserted in SCREEN space: the mouse screen position maps to
@@ -128,8 +128,8 @@ try {
   }
 
   const version = await page.evaluate(() => window.__nova.version);
-  if (version !== '0.1.0') throw new Error(`expected version 0.1.0, got ${version}`);
-  console.log('render-check: game module initialised, version 0.1.0');
+  if (version !== '0.2.0') throw new Error(`expected version 0.2.0, got ${version}`);
+  console.log('render-check: game module initialised, version 0.2.0');
 
   // WebGL context exists and the canvas is on screen.
   const gl = await page.evaluate(() => {
@@ -141,22 +141,22 @@ try {
   if (!gl) throw new Error('no WebGL context on the game canvas');
   console.log(`render-check: WebGL context live (${gl.width}x${gl.height} canvas)`);
 
-  // The menu: title, one primary Play, 6 wave-set cards, NO version/engine
+  // The menu: title, one primary Play, 12 wave-set cards, NO version/engine
   // text anywhere the player can see.
   const menuText = await page.textContent('#menu');
   if (!menuText.includes('NEON NOVA')) throw new Error('menu title missing');
-  if (menuText.includes('v0.1.0') || menuText.includes('Three.js') || menuText.includes('0.160.0')) {
+  if (menuText.includes('v0.2.0') || menuText.includes('Three.js') || menuText.includes('0.160.0')) {
     throw new Error('menu shows version/engine text — it must live in the README only');
   }
   const playClass = await page.getAttribute('#btn-play', 'class');
   if (!playClass || !playClass.includes('primary')) throw new Error('Play is not the primary action');
   const setCards = await page.locator('#set-select .set-card').count();
-  if (setCards !== 6) throw new Error(`expected 6 wave-set cards, got ${setCards}`);
+  if (setCards !== 12) throw new Error(`expected 12 wave-set cards, got ${setCards}`);
   const sets = await page.evaluate(() => window.__nova.waveSets());
-  if (sets.length !== 6 || sets[0].name !== 'First Contact' || sets[5].name !== 'Nova Gauntlet') {
+  if (sets.length !== 12 || sets[0].name !== 'First Contact' || sets[5].name !== 'Nova Gauntlet' || sets[11].name !== 'Final Nova') {
     throw new Error(`wave set list wrong: ${JSON.stringify(sets.map((s) => s.name))}`);
   }
-  console.log('render-check: menu renders — live 3D behind it, no version text, Play primary, 6 wave sets');
+  console.log('render-check: menu renders — live 3D behind it, no version text, Play primary, 12 wave sets');
 
   // The attract flight flies behind the menu: the demo ship moves
   // (position change, not just kills — the ship must actually fly).

@@ -1,4 +1,4 @@
-// Neon Nova v0.1.0 — bot harness: the greedy combat bot plays every
+// Neon Nova v0.2.0 — bot harness: the greedy combat bot plays every
 // wave set to completion through the public stepRun + policy hooks, and
 // the anti-slop gate asserts sitting still and holding fire CANNOT
 // finish any wave set — if the bot could clear a set without moving,
@@ -21,4 +21,4 @@ for (const set of WAVE_SETS) {
 }
 
 if (failures) { console.error(`bot: ${failures} failure(s)`); process.exit(1); }
-console.log('bot: PASS — combat bot completes all 6 wave sets, sitting still fails all 6');
+console.log(`bot: PASS — combat bot completes all ${WAVE_SETS.length} wave sets, sitting still fails all ${WAVE_SETS.length}`);
