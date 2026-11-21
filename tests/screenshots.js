@@ -1,12 +1,14 @@
-// Neon Nova v0.4.0 — real gameplay screenshot capture + size sweep.
+// Neon Nova v0.5.0 — real gameplay screenshot capture + size sweep.
 // Serves the game dir over local HTTP, loads it in headless Chromium, and
 // captures three PNGs into docs/screenshots/ for the README:
 //   menu.png      — the main menu over the live 3D attract scene
 //   gameplay.png  — wave set 1 mid-run, ship firing at the swarm
 //   runover.png   — the run-over screen after the ship is down
 // Then runs the game-ui-ux size sweep (1280x720, 2560x1080, 1080x2340):
-// menu + gameplay screenshots at each size go to /tmp/neon-nova-size-sweep/
-// for the by-eye check — no clipped or overlapping elements at any size.
+// menu + gameplay + settings screenshots at each size go to
+// /tmp/neon-nova-size-sweep/ for the by-eye check — no clipped or
+// overlapping elements at any size — plus the upgrade screen at
+// 2560x1080 (the M4 toast-overlap spot, fixed in M5).
 // Reuses the render-check's Three.js CDN workaround (the sandboxed browser
 // cannot reach jsdelivr; the pinned module is fulfilled from a curl cache
 // in the OS temp dir — nothing is vendored into the repo).
@@ -147,7 +149,7 @@ try {
     await context.close();
   }
 
-  // --- size sweep: menu + gameplay at 1280x720, 2560x1080, 1080x2340 ---
+  // --- size sweep: menu + gameplay + settings at 1280x720, 2560x1080, 1080x2340 ---
   for (const [name, viewport] of [
     ['menu-1280x720', { width: 1280, height: 720 }],
     ['menu-2560x1080', { width: 2560, height: 1080 }],
@@ -157,6 +159,17 @@ try {
     await page.waitForTimeout(2000);
     await page.screenshot({ path: path.join(SWEEP_DIR, `${name}.png`) });
     console.log(`screenshots: size sweep ${name}.png captured`);
+    // Settings screen at this size (M5: new text-size + contrast rows).
+    // Wait for the pop-in animation to actually finish (opacity 1):
+    // under swiftshader at 2560 the page renders a few fps, so a
+    // fixed 400ms wait catches the panel mid-fade (opacity ~0) and
+    // the screenshot looks empty.
+    await page.click('#btn-settings');
+    await page.waitForFunction(() => !document.getElementById('settings').classList.contains('hidden'), null, { timeout: 5000 });
+    await page.waitForFunction(() => getComputedStyle(document.querySelector('#settings .panel')).opacity === '1', null, { timeout: 30000 });
+    await page.screenshot({ path: path.join(SWEEP_DIR, `${name.replace('menu', 'settings')}.png`) });
+    console.log(`screenshots: size sweep ${name.replace('menu', 'settings')}.png captured`);
+    await page.click('#btn-settings-close');
     await page.click('#btn-play');
     await page.waitForFunction(() => window.__nova.state.phase === 'run', null, { timeout: 5000 });
     await page.evaluate(() => window.__nova.autopilot(true));
@@ -166,6 +179,22 @@ try {
     await page.waitForTimeout(300);
     await page.screenshot({ path: path.join(SWEEP_DIR, `${name.replace('menu', 'gameplay')}.png`) });
     console.log(`screenshots: size sweep ${name.replace('menu', 'gameplay')}.png captured`);
+    // Upgrade screen at 2560x1080 (the M4 toast-overlap spot): clear
+    // set 1 in campaign mode and capture the draft screen. Only at
+    // 2560 — the same code path serves every size, and the M4 sweep
+    // already covered the upgrade screen at the other sizes.
+    if (name === 'menu-2560x1080') {
+      await page.evaluate(() => window.__nova.autopilot(false));
+      await page.evaluate(() => window.__nova.quitToMenu());
+      await page.waitForFunction(() => window.__nova.state.phase === 'menu', null, { timeout: 5000 });
+      await page.evaluate(() => window.__nova.startCampaign());
+      await page.waitForFunction(() => window.__nova.state.phase === 'run', null, { timeout: 5000 });
+      await page.evaluate(() => window.__nova.autopilot(true));
+      await page.waitForFunction(() => window.__nova.state.phase === 'upgrade', null, { timeout: 420000 });
+      await page.waitForFunction(() => getComputedStyle(document.querySelector('#upgrade .panel')).opacity === '1', null, { timeout: 30000 });
+      await page.screenshot({ path: path.join(SWEEP_DIR, 'upgrade-2560x1080.png') });
+      console.log('screenshots: size sweep upgrade-2560x1080.png captured');
+    }
     await context.close();
   }
 

@@ -1,4 +1,4 @@
-// Neon Nova v0.4.0 — Node smoke tests for physics.js (no DOM, no Three.js).
+// Neon Nova v0.5.0 — Node smoke tests for physics.js (no DOM, no Three.js).
 import {
   VERSION, WAVE_SETS, waveSetById, totalEnemiesInSet, setThreat, comboMultiplier,
   createRun, startRun, stepRun, simulateRun, stationaryPolicy, greedyPolicy,
@@ -9,6 +9,7 @@ import {
   UPGRADES, UPGRADE_ORDER, upgradeStats, upgradeLevel, upgradeCost, applyUpgrade,
   makeSurvivalSet, generateSurvivalWave, survivalWaveThreat,
   isSetUnlocked, isSurvivalUnlocked, defaultCampaign,
+  PERF_LEVELS, PERF_FPS_THRESHOLD, PERF_LOW_MS, perfGuardStep,
   mulberry32, clamp, defaultSave, serializeSave, parseSave, recordBest, SAVE_VERSION,
 } from '../physics.js';
 
@@ -20,7 +21,7 @@ function check(name, cond) {
 }
 function approx(a, b, eps = 1e-9) { return Math.abs(a - b) <= eps; }
 
-check('physics version is 0.4.0', VERSION === '0.4.0');
+check('physics version is 0.5.0', VERSION === '0.5.0');
 check('12 wave sets defined', WAVE_SETS.length === 12);
 check('wave set ids are 1..12 in order', WAVE_SETS.every((s, i) => s.id === i + 1));
 check('every wave set has a name and a hint', WAVE_SETS.every((s) => s.name && s.hint));
@@ -501,6 +502,28 @@ check('shoot, kill and pickup are small with no hit-stop',
   check('save clamps campaign upgrades to the max', parseSave('{"campaign":{"upgrades":{"rapid":9}}}').campaign.upgrades.rapid === 3);
   check('save clamps campaign nextSet', parseSave('{"campaign":{"nextSet":99}}').campaign.nextSet === 13);
   check('save without a campaign field gets a fresh one', parseSave('{"best":{}}').campaign.nextSet === 1);
+}
+
+// --- M5: FPS guard + accessibility save fields ---
+{
+  check('perf ladder starts at full resolution and steps down to 1', PERF_LEVELS[0] === 2 && PERF_LEVELS[PERF_LEVELS.length - 1] === 1);
+  check('perf ladder is strictly decreasing', PERF_LEVELS.every((v, i) => i === 0 || v < PERF_LEVELS[i - 1]));
+  check('guard steps down when fps is low for the full window', perfGuardStep(0, 30, 3000) === 1);
+  check('guard steps down from any rung below the max', perfGuardStep(1, 20, 5000) === 2);
+  check('guard does not step down when fps is fine', perfGuardStep(0, 55, 10000) === 0);
+  check('guard does not step down before the window elapses', perfGuardStep(0, 30, 2999) === 0);
+  check('guard does not step down at exactly the threshold fps', perfGuardStep(0, 45, 3000) === 0);
+  check('guard never steps past the last rung', perfGuardStep(PERF_LEVELS.length - 1, 10, 99999) === PERF_LEVELS.length - 1);
+  check('guard clamps an out-of-range level', perfGuardStep(99, 10, 99999) === PERF_LEVELS.length - 1);
+  check('default save has Normal text size and no high contrast', defaultSave().textSize === 1 && defaultSave().highContrast === false);
+  check('save round-trips Large text + high contrast',
+    parseSave('{"textSize":1.2,"highContrast":true}').textSize === 1.2
+    && parseSave('{"textSize":1.2,"highContrast":true}').highContrast === true);
+  check('save round-trips Extra large text', parseSave('{"textSize":1.4}').textSize === 1.4);
+  check('save rejects an invalid text size', parseSave('{"textSize":9}').textSize === 1);
+  check('save rejects a non-boolean high contrast', parseSave('{"highContrast":"yes"}').highContrast === false);
+  check('old save without the M5 fields gets the defaults',
+    parseSave('{"muted":true}').textSize === 1 && parseSave('{"muted":true}').highContrast === false);
 }
 
 console.log(`\nsmoke: ${passed} passed, ${failed} failed`);

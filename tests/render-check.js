@@ -1,5 +1,5 @@
-// Neon Nova v0.4.0 — headless Chromium render check.
-// Serves the game dir over local HTTP, loads it in headless Chromium, and
+// Neon Nova v0.5.0 — headless browser render check.
+// Serves the game dir over local HTTP, loads it in a headless browser, and
 // asserts the M1 core, by hook and by eye:
 //   - the menu renders over a LIVE 3D scene (the attract flight actually
 //     flies — the demo ship moves), with no version/engine text anywhere
@@ -22,7 +22,18 @@
 //     then the menu shows set 2 and Survival unlocked
 //   - M4 survival: the Survival button starts an endless run (mode
 //     survival, wave 1, no set end)
+//   - M5 accessibility: text size + high contrast apply and persist
+//     across reload; a toast hides when a screen opens; touch input
+//     (stick drag moves, aim drag fires, DASH button appears); the
+//     FPS guard's level actually changes the renderer pixel ratio
+//     and quitting to the menu restores full resolution
 //   - zero console errors and zero page errors, and a WebGL context exists
+//
+// Run: node tests/render-check.js (Chromium) or
+//      xvfb-run -a env PW_BROWSER=firefox node tests/render-check.js
+//      (Firefox — the M5 cross-browser check; headless Firefox on
+//      this VM has no WebGL at all, so it runs headed under Xvfb
+//      with software GL, which does give a WebGL2 context).
 //
 // CDN note: the repo pins Three.js 0.160.0 from jsdelivr and does NOT
 // vendor it. The sandboxed browser cannot reach the jsdelivr CDN (the VM
@@ -96,17 +107,43 @@ const port = server.address().port;
 
 const require = createRequire(import.meta.url);
 const playwrightPath = fileURLToPath(new URL('../../neon-hexfall/node_modules/playwright-core', import.meta.url));
-const { chromium } = require(playwrightPath);
-const executablePath = findHeadlessShell();
-console.log('render-check: chromium executable:', executablePath || '(playwright default)');
-const launchArgs = ['--no-sandbox', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required'];
+const { chromium, firefox } = require(playwrightPath);
+const PW_BROWSER = (process.env.PW_BROWSER || 'chromium').toLowerCase();
+const pw = PW_BROWSER === 'firefox' ? firefox : chromium;
+const executablePath = PW_BROWSER === 'firefox' ? null : findHeadlessShell();
+console.log(`render-check: ${PW_BROWSER} executable:`, executablePath || '(playwright default)');
+const launchArgs = PW_BROWSER === 'firefox' ? []
+  : ['--no-sandbox', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required'];
 
 const errors = [];
+const T0 = Date.now();
+const stamp = () => ((Date.now() - T0) / 1000).toFixed(1) + 's';
+// Playwright's Firefox driver emits "Navigated away from page" console
+// errors when a page/context is torn down (proven by probe: 2 per
+// reload, a burst of 22 at ctx.close(), all at one timestamp, none
+// during gameplay — the game's own JS throws nothing). They are a
+// driver artifact, not game errors, so the Firefox run filters them
+// out and counts them separately instead of failing the check.
+let navAwayArtifacts = 0;
+function noteConsole(msg) {
+  if (msg.type() !== 'error') return;
+  if (PW_BROWSER === 'firefox' && msg.text().includes('Navigated away from page')) {
+    navAwayArtifacts++;
+    return;
+  }
+  errors.push(stamp() + ' console: ' + msg.text());
+}
 let browser;
 try {
-  browser = await chromium.launch({
+  browser = await pw.launch({
     ...(executablePath ? { executablePath } : {}),
     args: launchArgs,
+    // Firefox: headless has no WebGL on this VM (no GL at all, even
+    // with webgl.force-enabled). Headed under Xvfb with software GL
+    // gives a WebGL2 context via llvmpipe — see the header note.
+    ...(PW_BROWSER === 'firefox'
+      ? { headless: false, env: { ...process.env, LIBGL_ALWAYS_SOFTWARE: '1' } }
+      : {}),
   });
   const context = await browser.newContext({
     viewport: { width: 1280, height: 720 },
@@ -114,10 +151,8 @@ try {
     hasTouch: true,
   });
   const page = await context.newPage();
-  page.on('console', (msg) => {
-    if (msg.type() === 'error') errors.push('console: ' + msg.text());
-  });
-  page.on('pageerror', (err) => errors.push('pageerror: ' + String(err)));
+  page.on('console', noteConsole);
+  page.on('pageerror', (err) => errors.push(stamp() + ' pageerror: ' + String(err)));
 
   if (!process.env.NO_THREE_CACHE) {
     const cached = await fetchThreeModule();
@@ -136,8 +171,8 @@ try {
   }
 
   const version = await page.evaluate(() => window.__nova.version);
-  if (version !== '0.4.0') throw new Error(`expected version 0.4.0, got ${version}`);
-  console.log('render-check: game module initialised, version 0.4.0');
+  if (version !== '0.5.0') throw new Error(`expected version 0.5.0, got ${version}`);
+  console.log('render-check: game module initialised, version 0.5.0');
 
   // WebGL context exists and the canvas is on screen.
   const gl = await page.evaluate(() => {
@@ -153,7 +188,7 @@ try {
   // text anywhere the player can see.
   const menuText = await page.textContent('#menu');
   if (!menuText.includes('NEON NOVA')) throw new Error('menu title missing');
-  if (menuText.includes('v0.4.0') || menuText.includes('Three.js') || menuText.includes('0.160.0')) {
+  if (menuText.includes('v0.5.0') || menuText.includes('Three.js') || menuText.includes('0.160.0')) {
     throw new Error('menu shows version/engine text — it must live in the README only');
   }
   const playClass = await page.getAttribute('#btn-play', 'class');
@@ -210,13 +245,26 @@ try {
   console.log('render-check: PLAY starts wave set 1 (First Contact), HUD visible');
 
   // Music: the sequencer runs after the Play gesture and advances.
+  // (If the AudioContext is suspended — this VM's Firefox has no
+  // audio device at all, no /dev/snd and no PulseAudio, so resume()
+  // cannot un-suspend it — the sequencer is armed and the clock is
+  // frozen, so the advance check is skipped: the sequencer advances
+  // whenever the clock runs, which the Chromium run proves on the
+  // same code. A real Firefox with a sound card runs it.)
   const audio0 = await page.evaluate(() => window.__nova.info().audio);
   if (!audio0) throw new Error('no AudioContext after the Play gesture');
   if (!audio0.music) throw new Error('music sequencer is not running');
   await page.waitForTimeout(2500);
   const audio1 = await page.evaluate(() => window.__nova.info().audio);
-  if (audio1.musicStep <= audio0.musicStep) throw new Error(`music sequencer did not advance (step ${audio0.musicStep} -> ${audio1.musicStep})`);
-  console.log(`render-check: music sequencer running (state ${audio1.state}, step ${audio0.musicStep} -> ${audio1.musicStep})`);
+  if (audio1.musicStep <= audio0.musicStep) {
+    if (audio1.state === 'suspended') {
+      console.log('render-check: audio suspended (no audio device in this environment) — sequencer armed, advance check skipped');
+    } else {
+      throw new Error(`music sequencer did not advance (step ${audio0.musicStep} -> ${audio1.musicStep})`);
+    }
+  } else {
+    console.log(`render-check: music sequencer running (state ${audio1.state}, step ${audio0.musicStep} -> ${audio1.musicStep})`);
+  }
 
   // Movement moves the ship: hold the hook input right until the ship
   // has clearly moved (poll, not a fixed window — under swiftshader a
@@ -722,12 +770,145 @@ try {
   if (!survBest || survBest.score <= 0) throw new Error(`survival best should be saved: ${JSON.stringify(survBest)}`);
   console.log(`render-check: survival best saved (${survBest.score.toLocaleString()}, ${survBest.waves} waves)`);
 
+  // --- M5: accessibility settings, toast hygiene, touch input, FPS guard ---
+  // Text size Large applies a 120% root font size; high contrast puts
+  // the class on the body; both persist across a reload (localStorage).
+  await page.click('#btn-settings');
+  await page.waitForFunction(() => !document.getElementById('settings').classList.contains('hidden'), null, { timeout: 5000 });
+  await page.selectOption('#text-size-select', '1.2');
+  const rootFont = await page.evaluate(() => document.documentElement.style.fontSize);
+  if (rootFont !== '120%') throw new Error(`text size Large should set root font-size to 120%, got ${rootFont}`);
+  await page.check('#high-contrast-toggle');
+  if (!await page.evaluate(() => document.body.classList.contains('high-contrast'))) {
+    throw new Error('high contrast toggle did not apply the body class');
+  }
+  await page.click('#btn-settings-close');
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => window.__nova, null, { timeout: 30000 });
+  const savedM5 = await page.evaluate(() => window.__nova.save());
+  if (savedM5.textSize !== 1.2 || savedM5.highContrast !== true) {
+    throw new Error(`accessibility settings did not persist: ${JSON.stringify({ textSize: savedM5.textSize, highContrast: savedM5.highContrast })}`);
+  }
+  if (await page.evaluate(() => document.documentElement.style.fontSize) !== '120%') {
+    throw new Error('text size did not re-apply after reload');
+  }
+  if (!await page.evaluate(() => document.body.classList.contains('high-contrast'))) {
+    throw new Error('high contrast did not re-apply after reload');
+  }
+  console.log('render-check: M5 accessibility — Large text (120%) + high contrast apply and persist across reload');
+  // Reset to defaults so later sections (and the next run) start clean.
+  await page.evaluate(() => { window.__nova.setTextSize(1); window.__nova.setHighContrast(false); });
+
+  // Toast hygiene (M4 cosmetic): a locked-set toast must hide when a
+  // screen opens instead of showing through the overlay.
+  await page.locator('#set-select .set-card').nth(11).click(); // set 12, locked
+  await page.waitForFunction(() => document.getElementById('hud-toast').classList.contains('show'), null, { timeout: 5000 });
+  await page.click('#btn-settings');
+  await page.waitForFunction(() => !document.getElementById('settings').classList.contains('hidden'), null, { timeout: 5000 });
+  if (await page.evaluate(() => document.getElementById('hud-toast').classList.contains('show'))) {
+    throw new Error('toast stayed visible after opening a screen — it shows through the overlay');
+  }
+  await page.click('#btn-settings-close');
+  console.log('render-check: M5 toast hides when a screen opens');
+
+  // Touch input: synthetic touch pointer events drive the real handlers
+  // (left half = move stick, right half = aim + fire, DASH appears).
+  // Swiftshader runs the game far slower than real time, so the stick
+  // hold polls for the ship to move instead of using a fixed window.
+  await page.click('#btn-play');
+  await page.waitForFunction(() => window.__nova.state.phase === 'run', null, { timeout: 5000 });
+  const touch0 = await page.evaluate(() => {
+    const c = document.getElementById('game-container');
+    const mk = (type, id, x, y) => new PointerEvent(type, {
+      pointerType: 'touch', pointerId: id, clientX: x, clientY: y, bubbles: true, isPrimary: true,
+    });
+    const before = window.__nova.info();
+    c.dispatchEvent(mk('pointerdown', 1, 200, 500)); // left half: stick
+    const stickShown = !document.getElementById('touch-stick').classList.contains('hidden');
+    c.dispatchEvent(mk('pointermove', 1, 260, 500)); // drag right, stick held
+    return {
+      before, stickShown,
+      dashVisible: !document.getElementById('btn-dash').classList.contains('hidden'),
+    };
+  });
+  if (!touch0.stickShown) throw new Error('touch stick did not appear on a left-half touch');
+  if (!touch0.dashVisible) throw new Error('DASH button did not appear on first touch');
+  await page.waitForFunction(() => {
+    const i = window.__nova.info();
+    return i && i.ship.x > 1;
+  }, null, { timeout: 20000 });
+  const touchMid = await page.evaluate(() => window.__nova.info());
+  const stickHidden = await page.evaluate(() => {
+    const c = document.getElementById('game-container');
+    const mk = (type, id, x, y) => new PointerEvent(type, {
+      pointerType: 'touch', pointerId: id, clientX: x, clientY: y, bubbles: true, isPrimary: true,
+    });
+    c.dispatchEvent(mk('pointerup', 1, 260, 500));
+    return document.getElementById('touch-stick').classList.contains('hidden');
+  });
+  if (!stickHidden) throw new Error('touch stick stayed visible after the touch ended');
+  // Aim side: right-half touch aims and fires while held.
+  await page.evaluate(() => {
+    const c = document.getElementById('game-container');
+    const mk = (type, id, x, y) => new PointerEvent(type, {
+      pointerType: 'touch', pointerId: id, clientX: x, clientY: y, bubbles: true, isPrimary: true,
+    });
+    c.dispatchEvent(mk('pointerdown', 2, 1000, 300));
+  });
+  await page.waitForFunction((s0) => window.__nova.info().shotsFired > s0, touchMid.shotsFired, { timeout: 20000 });
+  const touchAfter = await page.evaluate(() => window.__nova.info());
+  await page.evaluate(() => {
+    const c = document.getElementById('game-container');
+    const mk = (type, id, x, y) => new PointerEvent(type, {
+      pointerType: 'touch', pointerId: id, clientX: x, clientY: y, bubbles: true, isPrimary: true,
+    });
+    c.dispatchEvent(mk('pointerup', 2, 1000, 300));
+  });
+  console.log(`render-check: M5 touch — stick moves the ship (x ${touch0.before.ship.x.toFixed(1)} -> ${touchMid.ship.x.toFixed(1)}), aim touch fires (${touchMid.shotsFired} -> ${touchAfter.shotsFired} shots), DASH appears`);
+  await page.evaluate(() => window.__nova.quitToMenu());
+  await page.waitForFunction(() => window.__nova.state.phase === 'menu', null, { timeout: 5000 });
+
+  // FPS guard wiring: at deviceScaleFactor 2 the renderer starts at
+  // pixel ratio 2; the debug hook steps it down the ladder through
+  // the same path the guard uses, and quitting restores full ratio.
+  const ctx2 = await browser.newContext({
+    viewport: { width: 1280, height: 720 },
+    timezoneId: 'Asia/Bangkok',
+    deviceScaleFactor: 2,
+    hasTouch: true,
+  });
+  const page2 = await ctx2.newPage();
+  page2.on('console', noteConsole);
+  page2.on('pageerror', (err) => errors.push(stamp() + ' pageerror: ' + String(err)));
+  if (!process.env.NO_THREE_CACHE) {
+    const cached = await fetchThreeModule();
+    await page2.route(THREE_URL, (route) => route.fulfill({ path: cached }));
+  }
+  await page2.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await page2.waitForFunction(() => window.__nova, null, { timeout: 30000 });
+  const pr0 = await page2.evaluate(() => window.__nova.state.perf.pixelRatio);
+  if (pr0 !== 2) throw new Error(`at deviceScaleFactor 2 the renderer should start at pixel ratio 2, got ${pr0}`);
+  await page2.click('#btn-play');
+  await page2.waitForFunction(() => window.__nova.state.phase === 'run', null, { timeout: 5000 });
+  const pr1 = await page2.evaluate(() => window.__nova.debugPerfSetLevel(2));
+  if (pr1 !== 1.25) throw new Error(`perf level 2 should set pixel ratio 1.25, got ${pr1}`);
+  if (await page2.evaluate(() => window.__nova.state.perf.level) !== 2) {
+    throw new Error('perf level did not stick after the debug step');
+  }
+  await page2.evaluate(() => window.__nova.quitToMenu());
+  await page2.waitForFunction(() => window.__nova.state.phase === 'menu', null, { timeout: 5000 });
+  const pr2 = await page2.evaluate(() => window.__nova.state.perf.pixelRatio);
+  if (pr2 !== 2) throw new Error(`quitting to menu should restore pixel ratio 2, got ${pr2}`);
+  await ctx2.close();
+  console.log('render-check: M5 FPS guard — pixel ratio 2 -> 1.25 at level 2, restored to 2 on menu');
+
+  if (navAwayArtifacts) console.log(`render-check: note — filtered ${navAwayArtifacts} Playwright-Firefox "Navigated away from page" teardown artifacts (not game errors)`);
   if (errors.length) {
     console.error('render-check: console/page errors:');
     for (const e of errors) console.error('  ' + e);
     throw new Error(`${errors.length} console/page error(s)`);
   }
-  console.log('render-check: PASS — menu, M4 gates, movement, screen-space aim, firing, dash, kill, wave clear, shield loss, run-over, campaign upgrade flow, survival, zero console errors');
+  console.log('render-check: PASS — menu, M4 gates, movement, screen-space aim, firing, dash, kill, wave clear, shield loss, run-over, campaign upgrade flow, survival, M5 accessibility + toast + touch + FPS guard, zero console errors');
 } finally {
   if (browser) await browser.close();
   server.close();
