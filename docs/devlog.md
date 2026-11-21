@@ -1,5 +1,54 @@
 # Neon Nova — devlog
 
+## M4 — Progression & depth (v0.4.0, 2026-11-21)
+
+The game now has a reason to come back. **Campaign** plays all 12 sets
+in a row: score, energy and upgrades carry across sets, shields refill
+between sets, and death ends the campaign (best total kept, progress
+resets — a roguelite run, not a grind). **Survival** is endless
+escalating waves, chosen over Time Attack because the core is
+aim-and-move under pressure and a clock would reward rushing rather
+than the careful flying the game is built on. **Upgrades** are bought
+with energy — six of them, each with levels that genuinely change the
+ship (Rapid Fire, Twin Shot, Heavy Rounds, Reinforced Hull, Dash
+Recharge, Magnet Core) — and everything costs 163 energy while one
+campaign earns roughly 150–200, so a build is a choice. **Gates:**
+clearing a set unlocks the next; clearing Set 1 unlocks Survival. The
+combo window tightened 3.5s → 2.5s (it sat at x4 from wave 2 on).
+
+The numbers say the progression works: a stock bot survives 9 survival
+waves, a mid-campaign loadout 17, a maxed one 30 — and the upgraded bot
+clears set 12 with 4 shields and 0 hits, where the stock bot took 2
+hits and finished on 1 shield. A stationary ship dies in survival wave
+2 at 7.6s, so the endless mode punishes standing still fast. One honest
+caveat: the perfect-aim stationary turret *does* clear survival wave 1
+(the teaching wave, 10 chasers in two staggered groups) — the gate for
+an endless mode is the run, not the first wave, and the run ends 7.6
+seconds in. Result: smoke 289/289, bot completes all 12 sets,
+render check clean including the full campaign upgrade flow (buy,
+carry-over, gates) and a survival run. Real-browser probes: the
+first two died in set 1 (waves 3 and 4 — the shooter introduction
+was too hot for a cold player), so set 1 was retuned (wave-3
+shooters 2→1, wave-4 3→2, 51→49 enemies) and the next two probes
+cleared it; the last one bought Magnet Core on the first draft,
+fought set 2 with the loadout, and fought survival to wave 5 alive.
+Two bugs found by the probes and fixed along the way: the upgrade
+screen read the finished run's stale energy (display and
+affordability stayed pre-purchase, and a second buy could
+double-spend — it now reads the banked campaign energy), and drafts
+could roll nothing affordable at 5–8 energy (the roll now
+guarantees an affordable offer when one exists, and Magnet Core
+costs 5 instead of 6).
+
+### Known issues (M4)
+
+- Survival wave 1 is clearable by a perfect-aim stationary turret (see
+  above) — the run-level gate holds, but the first wave is the gentlest
+  in the mode by design.
+- Set 1 is still easy for a good player (clean clear, combo never
+  breaks) — the ramp lives in sets 2–12.
+- Campaign progress is kept in the local save only — no cloud sync.
+
 ## M3 — Feel & juice (v0.3.0, 2026-11-21)
 
 Every combat event now fires its full layered bundle in one frame:
