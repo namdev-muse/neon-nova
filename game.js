@@ -1,4 +1,4 @@
-// Neon Nova v0.2.0 — 3D neon arena shooter (Three.js 0.160.0).
+// Neon Nova v0.3.0 — 3D neon arena shooter (Three.js 0.160.0).
 // Move with WASD/arrows, aim with the mouse, fire with click/Space,
 // dash with Shift. Chasers, shooters and splitters attack in dense
 // hand-crafted wave sets; kills chain a combo, hits cost shields.
@@ -6,8 +6,8 @@
 import * as THREE from 'three';
 import {
   VERSION, WAVE_SETS, waveSetById, comboMultiplier, startRun as physicsStartRun, stepRun,
-  greedyPolicy, nearestEnemy, ARENA_HALF_X, ARENA_HALF_Z, SHIP_RADIUS,
-  SHIELDS, DT, DASH_COOLDOWN, FEEDBACK, FEEDBACK_LAYERS,
+  greedyPolicy, nearestEnemy, ARENA_HALF_X, ARENA_HALF_Z, SHIP_RADIUS, MAX_SPEED,
+  SHIELDS, DT, DASH_COOLDOWN, SET_CLEAR_SCORE, FEEDBACK, FEEDBACK_LAYERS,
   defaultSave, serializeSave, parseSave, recordBest, clamp,
 } from './physics.js';
 
@@ -82,6 +82,10 @@ function sfx(name) {
     case 'enemyShoot': tone({ freq: 220, freqEnd: 160, dur: 0.09, type: 'sawtooth', vol: 0.08 }); break;
     case 'kill': noise({ dur: 0.12, vol: 0.22, freq: 1800 }); tone({ freq: 520, freqEnd: 130, dur: 0.16, type: 'square', vol: 0.14 }); break;
     case 'hit': tone({ freq: 140, freqEnd: 60, dur: 0.25, type: 'sine', vol: 0.35 }); noise({ dur: 0.2, vol: 0.25, freq: 500 }); break;
+    case 'tick': tone({ freq: 2400, dur: 0.03, type: 'sine', vol: 0.05 }); break; // bullet connects — quiet, high-frequency event
+    case 'split': tone({ freq: 900, freqEnd: 240, dur: 0.14, type: 'triangle', vol: 0.16 }); noise({ dur: 0.1, vol: 0.12, freq: 2400 }); break;
+    case 'waveStart': tone({ freq: 392, dur: 0.12, type: 'triangle', vol: 0.16 }); tone({ freq: 587, dur: 0.18, type: 'triangle', vol: 0.16, when: 0.1 }); break;
+    case 'heartbeat': tone({ freq: 70, freqEnd: 45, dur: 0.14, type: 'sine', vol: 0.28 }); tone({ freq: 65, freqEnd: 40, dur: 0.12, type: 'sine', vol: 0.2, when: 0.18 }); break;
     case 'pickup': tone({ freq: 1320, dur: 0.06, type: 'sine', vol: 0.14 }); tone({ freq: 1760, dur: 0.09, type: 'sine', vol: 0.14, when: 0.05 }); break;
     case 'dash': noise({ dur: 0.22, vol: 0.18, freq: 900 }); tone({ freq: 300, freqEnd: 900, dur: 0.18, type: 'sine', vol: 0.08 }); break;
     case 'waveClear': [523, 659, 784, 1047].forEach((f, i) => tone({ freq: f, dur: 0.14, type: 'triangle', vol: 0.16, when: i * 0.07 })); break;
@@ -91,24 +95,40 @@ function sfx(name) {
     default: break;
   }
 }
-function musicNote(freq, t0, dur) {
+function musicNote(freq, t0, dur, vol = 0.22, type = 'triangle') {
   const osc = audioCtx.createOscillator();
   const g = audioCtx.createGain();
-  osc.type = 'triangle';
+  osc.type = type;
   osc.frequency.value = freq;
   g.gain.setValueAtTime(0.0001, t0);
-  g.gain.exponentialRampToValueAtTime(0.22, t0 + 0.02);
+  g.gain.exponentialRampToValueAtTime(vol, t0 + 0.02);
   g.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
   osc.connect(g); g.connect(musicGain);
   osc.start(t0); osc.stop(t0 + dur + 0.02);
 }
+// Lead arp: A minor pentatonic, quiet, on the off-eighths. It joins
+// from wave 2 onward — the music gets busier as the run heats up —
+// and stays out of the menu attract flight (wave 1 bass only).
+const LEAD_ARP = [440, 523.25, 659.25, 783.99, 659.25, 523.25, 587.33, 880];
+let musicLeadOn = false;
 function musicStepFn() {
   if (!audioCtx || !save.music) return;
   const stepDur = 60 / MUSIC_BPM / 2; // eighth notes
+  const waveIdx = phase === 'run' && run ? run.waveIndex : 0;
+  musicLeadOn = waveIdx >= 1;
   while (nextStepTime < audioCtx.currentTime + 0.15) {
-    const f = BASS_LINE[musicStep % BASS_LINE.length];
+    const step = musicStep % 16;
+    const f = BASS_LINE[step];
     if (f) musicNote(f, nextStepTime, stepDur * 0.9);
-    if (musicStep % 4 === 2) { // soft hat tick on the off-beat
+    if (step === 0) { // bar pad: root + fifth, soft, one bar long
+      musicNote(110, nextStepTime, stepDur * 15, 0.05, 'sine');
+      musicNote(164.81, nextStepTime, stepDur * 15, 0.04, 'sine');
+    }
+    if (musicLeadOn && step % 2 === 1) {
+      const lf = LEAD_ARP[(musicStep >> 1) % LEAD_ARP.length];
+      musicNote(lf, nextStepTime, stepDur * 0.8, 0.07, 'sine');
+    }
+    if (step % 4 === 2) { // soft hat tick on the off-beat
       const t0 = nextStepTime;
       const src = audioCtx.createBufferSource(); src.buffer = noiseBuf;
       const hp = audioCtx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 6000;
@@ -495,6 +515,17 @@ let timeScale = 1;
 let shakeStrength = save.shake;
 let shipSquashT = 0;
 let glowPulse = 0;
+let crossPulse = 0; // crosshair pop on each shot — decays back to 0
+let lastHeartbeat = 0;
+// Feedback log: the last 20 handled events with the layers that fired,
+// so the render check can assert every event's full bundle fired in
+// one synchronous call (all layers within the same frame, ~100ms is
+// the game-feel bar; the bundle is atomic by construction).
+const feedbackLog = [];
+function logFeedback(type, layers) {
+  feedbackLog.push({ type, layers: [...layers], at: performance.now() });
+  if (feedbackLog.length > 20) feedbackLog.shift();
+}
 let fpsEma = 60;
 let lastFrameT = performance.now();
 let accumulator = 0;
@@ -576,17 +607,23 @@ function screenToWorld(sx, sy) {
   return { x: 0, z: 0 };
 }
 
-// Feedback layers per event (the contract in physics.js — every event
-// fires its full bundle within ~100ms of the event).
+// Feedback layers per event (the contract in physics.js — every
+// primary event fires its full bundle in one synchronous call, so all
+// layers land within the same frame. Secondary events get deliberate
+// light feedback: bulletHit/enemyShoot/split/waveStart fire at high
+// frequency or ride on a primary bundle, so a full 5-8 layer bundle
+// on each would be noise.)
 function handleEvents(events) {
   for (const e of events) {
     const fb = FEEDBACK[e.type];
-    if (!fb) continue;
     switch (e.type) {
       case 'shoot':
         sfx('shoot');
         addTrauma(fb.trauma);
-        spawnParticles(e.x, e.z, 0.6, MATS.particleCyan, 1, 2, 0.25);
+        spawnParticles(e.x, e.z, 0.6, MATS.particleCyan, 3, 3, 0.25); // muzzle flash
+        glowPulse = Math.max(glowPulse, 0.5);
+        crossPulse = 1; // crosshair pops on every shot
+        logFeedback('shoot', FEEDBACK_LAYERS.shoot);
         break;
       case 'kill': {
         sfx('kill');
@@ -596,39 +633,75 @@ function handleEvents(events) {
         spawnRing(e.x, e.z, 0xf472b6, 4, 0.4);
         glowPulse = 1;
         showPop(e.x, e.z, '+' + e.score, e.combo >= 10 ? 'magenta' : 'cyan');
+        logFeedback('kill', FEEDBACK_LAYERS.kill);
         break;
       }
-      case 'bulletHit':
+      case 'bulletHit': {
+        // Light by design: this fires on every connecting bullet.
+        // Tick + spark + a white flash-pop on the enemy mesh (flashT
+        // is consumed by syncEnemies) + a tiny impact ring.
+        sfx('tick');
         spawnParticles(e.x, e.z, 0.6, MATS.particleWhite, 3, 5, 0.3);
+        spawnRing(e.x, e.z, 0xffffff, 1.5, 0.25);
+        const hitMesh = enemyMeshes.get(e.id);
+        if (hitMesh) hitMesh.userData.flashT = 0.12;
+        logFeedback('bulletHit', ['sound', 'particles', 'flash', 'ringPulse']);
         break;
+      }
+      case 'enemyShoot': {
+        // Muzzle spark at the shooter + a flash-pop on its mesh.
+        sfx('enemyShoot');
+        spawnParticles(e.x, e.z, 0.6, MATS.particleMagenta, 2, 4, 0.3);
+        const shooterMesh = enemyMeshes.get(e.id);
+        if (shooterMesh) shooterMesh.userData.flashT = 0.12;
+        logFeedback('enemyShoot', ['sound', 'particles', 'flash']);
+        break;
+      }
       case 'split':
-        sfx('kill');
+        sfx('split');
         spawnParticles(e.x, e.z, 0.6, MATS.particleGold, 10, 8, 0.6);
+        spawnRing(e.x, e.z, 0xfbbf24, 5, 0.45);
+        logFeedback('split', ['sound', 'particles', 'ringPulse']);
+        break;
+      case 'drop':
+        spawnParticles(e.x, e.z, 0.6, MATS.particleGold, 2, 3, 0.4);
+        logFeedback('drop', ['particles']);
         break;
       case 'pickup':
         sfx('pickup');
         addTrauma(fb.trauma);
         spawnParticles(e.x, e.z, 0.6, MATS.particleGold, 6, 6, 0.5);
         showPop(e.x, e.z, '+25', '');
+        glowPulse = 1;
+        logFeedback('pickup', FEEDBACK_LAYERS.pickup);
         break;
       case 'dash':
         sfx('dash');
         addTrauma(fb.trauma);
         fovPulse = Math.max(fovPulse, 0.7);
         spawnParticles(e.x, e.z, 0.6, MATS.particleCyan, 10, 6, 0.5);
+        glowPulse = 1;
+        logFeedback('dash', FEEDBACK_LAYERS.dash);
         break;
       case 'waveClear':
         sfx('waveClear');
         addTrauma(fb.trauma);
         doHitStop(fb.hitStop);
         fovPulse = 1;
+        spawnParticles(run.x, run.z, 0.6, MATS.particleGold, 20, 10, 0.9);
+        spawnRing(run.x, run.z, 0xfbbf24, 8, 0.6);
         showPop(run.x, run.z, 'WAVE CLEAR +' + e.score, 'magenta');
         // On the last wave the set-complete screen follows immediately;
         // don't promise another wave that isn't coming.
         if (run.waveIndex + 1 < set.waves.length) toast(`Wave ${e.wave} clear — next wave incoming`);
+        logFeedback('waveClear', FEEDBACK_LAYERS.waveClear);
         break;
       case 'waveStart':
+        sfx('waveStart');
+        fovPulse = Math.max(fovPulse, 0.5);
+        spawnRing(run.x, run.z, 0x67e8f9, 6, 0.5);
         toast(`Wave ${e.wave} of ${set.waves.length}`);
+        logFeedback('waveStart', ['sound', 'fovPulse', 'ringPulse', 'toast']);
         break;
       case 'hit':
         sfx('hit');
@@ -640,6 +713,7 @@ function handleEvents(events) {
         spawnRing(e.x, e.z, 0xf87171, 5, 0.5);
         if (e.shields === 1) doSlowMo(0.7, 0.35); // near-death slow-mo
         toast(e.shields > 0 ? `Shield down — ${e.shields} left` : 'Ship down');
+        logFeedback('hit', FEEDBACK_LAYERS.hit);
         break;
       case 'setComplete':
         sfx('setComplete');
@@ -648,22 +722,28 @@ function handleEvents(events) {
         fovPulse = 1;
         spawnRing(run.x, run.z, 0xfbbf24, 12, 0.9);
         spawnParticles(run.x, run.z, 0.6, MATS.particleGold, 30, 12, 1.1);
+        showPop(run.x, run.z, '+' + SET_CLEAR_SCORE, 'magenta');
+        toast(`${set.name} cleared — ${run.kills} kills, score ${run.score.toLocaleString()}`);
+        logFeedback('setComplete', FEEDBACK_LAYERS.setComplete);
         break;
       case 'runOver':
         sfx('runOver');
         addTrauma(fb.trauma);
         doHitStop(fb.hitStop);
         flashHit();
+        shipSquashT = 0.4;
         spawnParticles(run.x, run.z, 0.6, MATS.particleMagenta, 40, 14, 1.2);
         spawnRing(run.x, run.z, 0xf87171, 14, 1);
+        toast('Ship down — the swarm wins this time');
+        logFeedback('runOver', FEEDBACK_LAYERS.runOver);
         break;
       case 'launch':
         sfx('launch');
         addTrauma(fb.trauma);
         fovPulse = 1;
-        break;
-      case 'enemyShoot':
-        sfx('enemyShoot');
+        spawnParticles(run.x, run.z, 0.6, MATS.particleCyan, 12, 8, 0.7);
+        glowPulse = 1;
+        logFeedback('launch', FEEDBACK_LAYERS.launch);
         break;
       default: break;
     }
@@ -1044,6 +1124,15 @@ function updateHUD() {
   const frac = run.dashCd > 0 ? 1 - run.dashCd / DASH_COOLDOWN : 1;
   $('dash-fill').style.transform = `scaleX(${frac})`;
   $('dash-label').textContent = frac >= 1 ? 'DASH READY' : 'DASH';
+  // Low-shield vignette: on while flying on the last shield, off
+  // everywhere else (menu / pause / more shields). Static, not
+  // breathing, when reduce-flashing is on.
+  const lowShield = phase === 'run' && run.shields === 1;
+  if (hudCache.lowShield !== lowShield) {
+    hudCache.lowShield = lowShield;
+    $('low-shield').classList.toggle('show', lowShield);
+  }
+  $('low-shield').classList.toggle('static', reduceFlashingOn());
 }
 
 // ---------- render sync ----------
@@ -1085,7 +1174,8 @@ function syncScene(dt) {
     crosshair.position.set(r.aimX, 0.06, r.aimZ);
     crossDot.position.set(r.aimX, 0.06, r.aimZ);
     const pulse = 1 + 0.08 * Math.sin(elapsed * 6);
-    crosshair.scale.setScalar(pulse);
+    crossPulse = Math.max(0, crossPulse - dt * 4); // shot pop decays to rest
+    crosshair.scale.setScalar(pulse * (1 + 0.35 * crossPulse));
   } else {
     crosshair.visible = false;
     crossDot.visible = false;
@@ -1119,8 +1209,14 @@ function updateCamera(dt) {
   const follow = aspect < 1 ? 0.55 : 0.25;
   const cx = r ? r.x * follow : 0;
   const cz = r ? r.z * follow : 0;
-  const lookX = r ? r.x * (follow + 0.1) : 0;
-  const lookZ = r ? r.z * (follow + 0.1) - 3 : -3;
+  // Aim lead: the look target leans a little toward the aim point, so
+  // the player sees slightly more of where they are shooting. Small
+  // (6%) — the aim mapping stays exact because screenToWorld uses
+  // this same camera.
+  const leadX = r ? (r.aimX - r.x) * 0.06 : 0;
+  const leadZ = r ? (r.aimZ - r.z) * 0.06 : 0;
+  const lookX = r ? r.x * (follow + 0.1) + leadX : 0;
+  const lookZ = r ? r.z * (follow + 0.1) - 3 + leadZ : -3;
   // Trauma shake: shake = trauma^2, decays in real time.
   trauma = Math.max(0, trauma - dt * 1.6);
   const amp = trauma * trauma * shakeStrength * 1.6;
@@ -1130,9 +1226,14 @@ function updateCamera(dt) {
   const shZ = amp * (Math.sin(t * 1.3) + Math.cos(t * 2.1) * 0.5);
   camera.position.set(cx + CAM_OFFSET.x + shX, CAM_OFFSET.y + shY, cz + CAM_OFFSET.z + shZ);
   camera.lookAt(lookX + shX * 0.5, 0, lookZ + shZ * 0.5);
-  // FOV: base 55, pulse on dash/kill/wave clear, settles back exactly.
+  // FOV: base 55, event pulse on dash/kill/wave clear, PLUS a speed
+  // kick — flying fast widens the view a little, and it settles back
+  // to exactly 55 when the ship slows (fovPulse decays to 0 and the
+  // speed term to 0, so the rest state is exact).
   fovPulse = Math.max(0, fovPulse - dt * 2.2);
-  const targetFov = 55 + fovPulse * 9;
+  const speed = r ? Math.hypot(r.vx, r.vz) : 0;
+  const speedKick = clamp(speed / MAX_SPEED, 0, 1) * 3.5;
+  const targetFov = 55 + fovPulse * 9 + speedKick;
   if (Math.abs(fovCurrent - targetFov) > 0.01) {
     fovCurrent += (targetFov - fovCurrent) * Math.min(1, 10 * dt);
     camera.fov = fovCurrent;
@@ -1157,6 +1258,12 @@ function frame(now) {
 
   const simDt = rawDt * timeScale;
   if (phase === 'run' && run && !run.done) {
+    // Low-shield heartbeat: a soft double-thump about once a second
+    // while on the last shield — audio twin of the vignette.
+    if (run.shields === 1 && nowS - lastHeartbeat > 1.0) {
+      lastHeartbeat = nowS;
+      sfx('heartbeat');
+    }
     accumulator += simDt;
     let steps = 0;
     while (accumulator >= DT && steps < 4) {
@@ -1247,8 +1354,9 @@ window.__nova = {
       kills: r.kills, hitsTaken: r.hitsTaken, dashes: r.dashes,
       shotsFired: r.shotsFired, pickupsCollected: r.pickupsCollected,
       time: r.time,
-      ship: { x: r.x, z: r.z, vx: r.vx, vz: r.vz, angle: r.angle, invuln: r.invuln, stun: r.stun },
+      ship: { x: r.x, z: r.z, vx: r.vx, vz: r.vz, angle: r.angle, invuln: r.invuln, stun: r.stun, speed: Math.hypot(r.vx, r.vz), scale: shipMesh.scale.x },
       aim: { x: r.aimX, z: r.aimZ, screen: aimSp },
+      lowShield: phase === 'run' && r.shields === 1,
       // Screen position of the ship — the camera looks from +z, so
       // tests assert movement direction in screen space, not world
       // space (the Drift M2 lesson: a mirrored-input bug survived
@@ -1260,10 +1368,13 @@ window.__nova = {
       enemies,
       pickups: r.pickups.length,
       done: r.done, reason: r.reason,
-      trauma, timeScale, fov: fovCurrent, fovPulse,
+      trauma, timeScale, fov: fovCurrent, fovPulse, crossPulse,
       shakeAmp: trauma * trauma * shakeStrength,
+      // Feedback log: the last handled events with the layers that
+      // fired, so tests can assert every bundle fired completely.
+      feedback: feedbackLog.map((f) => ({ type: f.type, layers: [...f.layers] })),
       audio: audioCtx
-        ? { state: audioCtx.state, music: !!musicTimer, musicStep, sfxOn: save.sfx, musicOn: save.music }
+        ? { state: audioCtx.state, music: !!musicTimer, musicStep, lead: musicLeadOn, sfxOn: save.sfx, musicOn: save.music }
         : null,
       perf: { fps: Math.round(fpsEma) },
     };

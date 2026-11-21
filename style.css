@@ -286,6 +286,24 @@ h2 {
   transition: opacity 0.12s ease;
 }
 .hit-flash.show { opacity: 1; }
+/* Low-shield vignette: a slow red edge-breathe while on the last
+   shield — a persistent near-death cue, not a flash (0.8 Hz, well
+   under 3/s). It is an extra cue only: the shield pips in the HUD
+   and the "Shield down" toast already carry the information, so
+   colour is never the only signal. With reduce-flashing it holds a
+   steady dim edge instead of breathing. */
+.low-shield {
+  position: fixed; inset: 0;
+  background: radial-gradient(ellipse at center, transparent 55%, rgba(248, 113, 113, 0.28) 100%);
+  opacity: 0; pointer-events: none; z-index: 7;
+  transition: opacity 0.4s ease;
+}
+.low-shield.show { opacity: 1; animation: low-shield-breathe 1.25s ease-in-out infinite; }
+.low-shield.show.static { animation: none; opacity: 0.6; }
+@keyframes low-shield-breathe {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
 
 /* --- complete / run over --- */
 .big-score { font-size: clamp(1.6rem, 5vmin, 2.4rem); font-weight: 800; color: var(--gold); margin: 6px 0; text-shadow: 0 0 18px rgba(251, 191, 36, 0.5); }

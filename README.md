@@ -9,7 +9,7 @@ the run ends. Clear every wave to finish the set. Score comes from kills
 × combo multiplier + wave bonuses — your best score is saved per wave set.
 
 **Live:** https://namdev-muse.github.io/neon-nova/
-**Version:** v0.2.0 (M2 wave craft)
+**Version:** v0.3.0 (M3 feel & juice)
 **Stack:** Three.js 0.160.0 (pinned via jsdelivr import map, no build step), vanilla HTML/CSS/JS, Web Audio synth SFX + generative music, GitHub Pages.
 
 ## Gameplay
@@ -33,6 +33,21 @@ ring around the ship and close from every side, faster than one aim line
 can kill them. The bot harness proves it — the greedy combat bot
 completes all 12 wave sets, while sitting still and holding fire fails
 all 12.
+
+## Feel & juice
+
+Every combat event fires a full layered bundle in one frame — sound,
+particles, shake, flash, knockback, hit-stop, slow-mo, FOV pulse,
+number pops — per the game-feel tiers (small / medium / large). Kills
+burst into particles and a shockwave ring with a score pop; taking a hit
+shakes the camera, flashes the screen, squashes the ship and knocks it
+back, with a hit-stop freeze and slow-mo on the last shield. The camera
+follows the ship, leans toward your aim, and widens its field of view
+as you fly faster. The generative soundtrack layers a bass line, a pad
+and — from wave 2 on — a lead arpeggio; on the last shield a slow red
+vignette breathes at the edges and a soft heartbeat thumps. Shake
+strength (0–100%), flashing, volume, music and SFX are all adjustable
+in Settings, and every effect settles back to its exact rest state.
 
 ## Wave sets
 
@@ -72,7 +87,7 @@ npm run screenshots   # README captures + 3-resolution size sweep (inspect by ey
 
 ## Tests
 
-- **Smoke (205 checks):** wave sets, movement momentum, aim, fire rate,
+- **Smoke (207 checks):** wave sets, movement momentum, aim, fire rate,
   dash, kills/combo/score, splitters, shooter bolts, shield loss,
   wave flow, determinism, the anti-slop gate, feedback tiers + layers,
   save round-trip.
@@ -82,5 +97,8 @@ npm run screenshots   # README captures + 3-resolution size sweep (inspect by ey
 - **Render check:** headless Chromium — menu over a live 3D attract
   scene, Play starts a run, movement and aim asserted in *screen* space,
   firing, dash, kill, wave-1 clear, shield loss with the flashing
-  toggle, pause/resume/restart, run-over, best score saved — zero
+  toggle, pause/resume/restart, run-over, best score saved — plus the
+  M3 feel assertions: every feedback bundle fires completely (read back
+  from the in-game feedback log), speed FOV kick and settle, rest-state
+  cleanliness, shake-0 suppression, low-shield vignette — zero
   console errors.

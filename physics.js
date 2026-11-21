@@ -1,4 +1,4 @@
-// Neon Nova v0.2.0 — pure simulation core (no DOM, no Three.js).
+// Neon Nova v0.3.0 — pure simulation core (no DOM, no Three.js).
 // The ship flies freely in a bounded neon arena (angled top-down view);
 // the player moves with WASD/arrows (momentum), aims with the mouse,
 // fires to destroy waves of enemies, and dashes (Shift) through danger
@@ -13,7 +13,7 @@
 // move AND aim with real decisions; sitting still and holding fire
 // fails every wave set (see simulateRun + the bot harness).
 
-export const VERSION = '0.2.0';
+export const VERSION = '0.3.0';
 export const ARENA_HALF_X = 34;
 export const ARENA_HALF_Z = 20;
 export const SHIP_RADIUS = 0.9;
@@ -81,7 +81,15 @@ export const FEEDBACK = {
 // shake, flash, knockback, hit-stop, slow-mo, FOV pulse, number pop.
 // This is the contract game.js implements per event; the smoke test
 // asserts every event carries at least 5 layers, and the render check
-// asserts the layers actually fire in the browser. ---
+// asserts the layers actually fire in the browser (via the feedback
+// log on window.__nova).
+// Secondary events (bulletHit, enemyShoot, split, waveStart, spawn,
+// drop, enemyRam) are NOT in this table on purpose: they fire at high
+// frequency or ride on a primary event's bundle, so a full 5-8 layer
+// bundle on each would be noise (shake on every bullet hit, a pop on
+// every splitter mini). They get 2-3 deliberate channels each —
+// documented in game.js handleEvents — and the render check asserts
+// those channels fire too. ---
 export const FEEDBACK_LAYERS = {
   launch: ['sound', 'shake', 'fovPulse', 'particles', 'glowPulse'],
   shoot: ['sound', 'particles', 'shake', 'glowPulse', 'pop'],
@@ -377,10 +385,13 @@ function applyHit(run, sx, sz, events) {
   run.invuln = INVULN_SECONDS;
   run.combo = 0;
   run.comboTimer = 0;
-  // Knockback away from the source.
+  // Knockback away from the source. 9 u/s: a readable jolt that sells
+  // the hit without throwing the ship across the arena (14 used to
+  // shove it into the next cluster — and into walls — on the dense
+  // sets, where the bot died on 9 and 12).
   const d = Math.hypot(sx, sz) || 1;
-  run.vx += (sx / d) * 14;
-  run.vz += (sz / d) * 14;
+  run.vx += (sx / d) * 9;
+  run.vz += (sz / d) * 9;
   events.push({ type: 'hit', x: run.x, z: run.z, shields: run.shields });
   if (run.shields <= 0) {
     run.done = true;
@@ -545,7 +556,7 @@ export function stepRun(run, input, dt = DT) {
           vx: (dx / d) * ENEMY_BULLET_SPEED, vz: (dz / d) * ENEMY_BULLET_SPEED,
           life: 6, r: ENEMY_BULLET_RADIUS,
         });
-        events.push({ type: 'enemyShoot', x: e.x, z: e.z });
+        events.push({ type: 'enemyShoot', id: e.id, x: e.x, z: e.z });
       }
     }
     e.x += e.vx * dt;
@@ -568,7 +579,7 @@ export function stepRun(run, input, dt = DT) {
       if (Math.hypot(b.x - e.x, b.z - e.z) < b.r + e.r) {
         run.bullets.splice(run.bullets.indexOf(b), 1);
         e.hp -= 1;
-        events.push({ type: 'bulletHit', x: b.x, z: b.z, kind: e.type });
+        events.push({ type: 'bulletHit', id: e.id, x: b.x, z: b.z, kind: e.type });
         if (e.hp <= 0) killEnemy(run, e, events);
         break;
       }
@@ -600,7 +611,8 @@ export function stepRun(run, input, dt = DT) {
         // chaser can never take two shields.
         run.enemies.splice(run.enemies.indexOf(e), 1);
         events.push({ type: 'enemyRam', kind: e.type, x: e.x, z: e.z });
-        applyHit(run, e.x - run.x, e.z - run.z, events);
+        // Knockback AWAY from the rammer (ship minus enemy position).
+        applyHit(run, run.x - e.x, run.z - e.z, events);
         break;
       }
     }
